@@ -1,0 +1,39 @@
+{
+  "drop": [
+    2
+  ],
+  "parts": [
+    {
+      "track": 1,
+      "name": "Voice",
+      "program": 52
+    },
+    {
+      "track": 3,
+      "name": "Violin",
+      "program": 40
+    },
+    {
+      "track": 4,
+      "name": "Cello",
+      "program": 42
+    },
+    {
+      "track": 5,
+      "name": "Piano · G clef",
+      "program": 0
+    },
+    {
+      "track": 6,
+      "name": "Piano · F clef",
+      "program": 0
+    },
+    {
+      "track": 7,
+      "name": "Drums",
+      "program": 0
+    }
+  ],
+  "tempoRatio": 0.9845288326300984,
+  "leadIn": 768
+}

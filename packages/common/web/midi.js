@@ -1,0 +1,901 @@
+// MIDI playback for the webviews (DECISIONS D24): a Standard MIDI File parser, a
+// small Web Audio synthesizer and the player that schedules one on the other.
+// Plain JS, no build step and no dependency (D12). Loaded before preview.js and
+// player.js, which find it as `LilyMidi`; test/midi/midi.test.ts loads the same
+// file through the CommonJS export, where no AudioContext exists.
+;(function () {
+  'use strict'
+
+  // ---- Standard MIDI File → notes ----------------------------------------------
+
+  const DEFAULT_TEMPO = 500000 // microseconds per quarter note: 120 bpm
+  const DRUMS = 9 // channel 10
+  const BEND_RANGE = 200 // cents either way, which is what lilypond's microtones assume
+
+  function fail(message) {
+    throw new Error(`Not a playable MIDI file: ${message}.`)
+  }
+
+  function text(bytes) {
+    return new TextDecoder('utf-8').decode(bytes).replace(/\0+$/, '').trim()
+  }
+
+  /** The events of one MTrk chunk with absolute `tick`s. Sysex is skipped. */
+  function readTrack(bytes, start, end) {
+    const events = []
+    let at = start
+    let tick = 0
+    let running = 0
+    const byte = () => (at < end ? bytes[at++] : fail('a track ends inside an event'))
+    const variable = () => {
+      let value = 0
+      for (let i = 0; i < 4; i++) {
+        const next = byte()
+        value = value * 128 + (next & 0x7f)
+        if (next < 0x80) return value
+      }
+      return fail('a variable-length number is too long')
+    }
+    while (at < end) {
+      tick += variable()
+      let status = byte()
+      if (status < 0x80) {
+        // Running status: this byte is already data.
+        if (running === 0) fail('data without a status byte')
+        status = running
+        at--
+      }
+      if (status === 0xff) {
+        const type = byte()
+        const length = variable()
+        if (at + length > end) fail('a meta event runs past its track')
+        events.push({ tick, meta: type, data: bytes.subarray(at, at + length) })
+        at += length
+      } else if (status === 0xf0 || status === 0xf7) {
+        at += variable()
+      } else {
+        running = status
+        const kind = status & 0xf0
+        const a = byte()
+        const b = kind === 0xc0 || kind === 0xd0 ? 0 : byte()
+        events.push({ tick, kind, channel: status & 0x0f, a, b })
+      }
+    }
+    return events
+  }
+
+  /** Tempo changes as `{ tick, seconds, tempo }`, so ticks convert without a walk from zero. */
+  function tempoMap(events, division) {
+    const map = [{ tick: 0, seconds: 0, tempo: DEFAULT_TEMPO }]
+    for (const event of events) {
+      if (event.meta !== 0x51 || event.data.length < 3) continue
+      const tempo = (event.data[0] << 16) | (event.data[1] << 8) | event.data[2]
+      const last = map[map.length - 1]
+      const seconds = last.seconds + ((event.tick - last.tick) * last.tempo) / division / 1e6
+      if (event.tick === last.tick) map[map.length - 1] = { ...last, tempo }
+      else map.push({ tick: event.tick, seconds, tempo })
+    }
+    return map
+  }
+
+  function secondsAt(map, division, tick) {
+    let entry = map[0]
+    for (const candidate of map) {
+      if (candidate.tick > tick) break
+      entry = candidate
+    }
+    return entry.seconds + ((tick - entry.tick) * entry.tempo) / division / 1e6
+  }
+
+  // lilypond plays a grace note at this fraction of its written length, ahead
+  // of the note it belongs to [measured on 2.26 with 4th, 8th, 16th and 32nd graces].
+  const GRACE_FRACTION = 11 / 48
+
+  /**
+   * When a moment of the score is heard: `at` whole notes from the start, plus
+   * `grace` whole notes of grace time (0 or negative), through the tempo map of
+   * `midi`. lilypond writes a quarter as `division` ticks (DECISIONS D26).
+   */
+  function momentTime(midi, at, grace = 0) {
+    return secondsAt(midi.tempos, midi.division, (at + grace * GRACE_FRACTION) * midi.division * 4)
+  }
+
+  /**
+   * Parses `bytes` (a Uint8Array) into what the player needs: `notes` sorted by
+   * `time`, each carrying the state of its channel when it began — program,
+   * `gain` (volume × expression), `pan` (-1…1), `detune` (cents). Controllers
+   * are resolved here, so a change during a note is not heard; the sustain
+   * pedal lengthens the notes it holds. Throws on anything that is not a
+   * Standard MIDI File with a metrical time division.
+   */
+  function parseMidi(bytes) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const tag = (at) => String.fromCharCode(...bytes.subarray(at, at + 4))
+    if (bytes.length < 14 || tag(0) !== 'MThd') fail('the MThd header is missing')
+    const format = view.getUint16(8)
+    const division = view.getUint16(12)
+    if (format > 1) fail(`format ${format} is not supported`)
+    if (division === 0 || division & 0x8000) fail('SMPTE time division is not supported')
+
+    const chunks = []
+    for (let at = 8 + view.getUint32(4); at + 8 <= bytes.length; ) {
+      const length = view.getUint32(at + 4)
+      const end = Math.min(at + 8 + length, bytes.length)
+      // Unknown chunk types are to be skipped, says the standard.
+      if (tag(at) === 'MTrk') chunks.push(readTrack(bytes, at + 8, end))
+      at = end
+    }
+    if (chunks.length === 0) fail('it has no tracks')
+
+    // Format 1 keeps the tempo in the first track, and it applies to all of them.
+    const tempos = chunks.flat().filter((event) => event.meta === 0x51)
+    const map = tempoMap(
+      tempos.sort((a, b) => a.tick - b.tick),
+      division,
+    )
+    const seconds = (tick) => secondsAt(map, division, tick)
+
+    // One pass over all tracks in time order: a channel is set up wherever the
+    // file likes, and what it then plays may be in another track.
+    const events = chunks.flatMap((chunk, track) => chunk.map((event) => ({ ...event, track })))
+    events.sort((a, b) => a.tick - b.tick)
+    const lastTick = events.length > 0 ? events[events.length - 1].tick : 0
+
+    const notes = []
+    const tracks = chunks.map(() => ({ name: '', channels: [], programs: [], notes: 0 }))
+    const channels = Array.from({ length: 16 }, () => ({
+      program: 0, volume: 100 / 127, expression: 1, pan: 0, detune: 0,
+      pedal: false, sounding: new Map(), held: [],
+    }))
+    const release = (note, tick) => {
+      note.duration = Math.max(seconds(tick) - note.time, 0)
+    }
+    for (const event of events) {
+      const track = tracks[event.track]
+      if (event.meta === 0x03 && !track.name) track.name = text(event.data)
+      if (event.meta !== undefined) continue
+      const state = channels[event.channel]
+      const on = event.kind === 0x90 && event.b > 0
+      if (on || event.kind === 0x80 || event.kind === 0x90) {
+        // Two staves that share a channel may hold the same key.
+        const id = event.track * 128 + event.a
+        const previous = state.sounding.get(id)
+        if (previous) {
+          state.sounding.delete(id)
+          if (state.pedal && !on) state.held.push(previous)
+          else release(previous, event.tick)
+        }
+        if (!on) continue
+        const note = {
+          time: seconds(event.tick),
+          duration: 0,
+          track: event.track,
+          channel: event.channel,
+          key: event.a,
+          velocity: event.b / 127,
+          program: state.program,
+          gain: state.volume * state.expression,
+          pan: state.pan,
+          detune: state.detune,
+        }
+        state.sounding.set(id, note)
+        notes.push(note)
+        track.notes++
+        if (!track.channels.includes(event.channel)) track.channels.push(event.channel)
+        if (event.channel !== DRUMS && !track.programs.includes(state.program)) {
+          track.programs.push(state.program)
+        }
+      } else if (event.kind === 0xc0) {
+        state.program = event.a
+      } else if (event.kind === 0xe0) {
+        state.detune = ((((event.b << 7) | event.a) - 8192) / 8192) * BEND_RANGE
+      } else if (event.kind === 0xb0) {
+        if (event.a === 7) state.volume = event.b / 127
+        else if (event.a === 11) state.expression = event.b / 127
+        else if (event.a === 10) state.pan = Math.max(-1, (event.b - 64) / 63)
+        else if (event.a === 64) {
+          state.pedal = event.b >= 64
+          if (!state.pedal) for (const note of state.held.splice(0)) release(note, event.tick)
+        }
+      }
+    }
+    // What the file never switched off lasts to the end.
+    for (const state of channels) {
+      for (const note of [...state.sounding.values(), ...state.held]) release(note, lastTick)
+    }
+    // lilypond names the first track after the \header's title, if there is one.
+    const title = tracks[0].name === 'control track' ? '' : tracks[0].name
+
+    notes.sort((a, b) => a.time - b.time)
+    markLegato(notes)
+    const lastNote = notes.reduce((end, note) => Math.max(end, note.time + note.duration), 0)
+    return {
+      format,
+      division,
+      title,
+      tracks,
+      notes,
+      /** Seconds to the end of the last track, which lilypond puts at the final bar line. */
+      duration: Math.max(seconds(lastTick), lastNote),
+      /** The tempo map, for momentTime. */
+      tempos: map,
+    }
+  }
+
+  /**
+   * Sets `legato` on each of `notes` (in time order) that begins as the one
+   * before it on its track and channel ends, with no other note of theirs
+   * sounding or starting with it: a line, not a chord (D150).
+   */
+  function markLegato(notes) {
+    const lines = new Map() // track and channel → its notes sounding, and how many began at `time`
+    for (const note of notes) {
+      const id = note.track * 16 + note.channel
+      let line = lines.get(id)
+      if (!line) lines.set(id, (line = { sounding: [], time: -1, starts: [] }))
+      if (line.time === note.time) {
+        // A chord: none of its notes continues a line.
+        for (const other of line.starts) other.legato = false
+        note.legato = false
+      } else {
+        const ended = line.sounding.filter((other) => other.time + other.duration <= note.time)
+        line.sounding = line.sounding.filter((other) => other.time + other.duration > note.time)
+        note.legato =
+          line.sounding.length === 0 && ended.length === 1 && ended[0].time + ended[0].duration === note.time
+        line.time = note.time
+        line.starts = []
+      }
+      line.starts.push(note)
+      line.sounding.push(note)
+    }
+  }
+
+  // ---- General MIDI --------------------------------------------------------------
+
+  // The names lilypond accepts for `midiInstrument`, in program order.
+  const INSTRUMENTS = (
+    'acoustic grand,bright acoustic,electric grand,honky-tonk,electric piano 1,electric piano 2,' +
+    'harpsichord,clav,celesta,glockenspiel,music box,vibraphone,marimba,xylophone,tubular bells,' +
+    'dulcimer,drawbar organ,percussive organ,rock organ,church organ,reed organ,accordion,harmonica,' +
+    'concertina,acoustic guitar (nylon),acoustic guitar (steel),electric guitar (jazz),' +
+    'electric guitar (clean),electric guitar (muted),overdriven guitar,distorted guitar,' +
+    'guitar harmonics,acoustic bass,electric bass (finger),electric bass (pick),fretless bass,' +
+    'slap bass 1,slap bass 2,synth bass 1,synth bass 2,violin,viola,cello,contrabass,' +
+    'tremolo strings,pizzicato strings,orchestral harp,timpani,string ensemble 1,string ensemble 2,' +
+    'synthstrings 1,synthstrings 2,choir aahs,voice oohs,synth voice,orchestra hit,trumpet,trombone,' +
+    'tuba,muted trumpet,french horn,brass section,synthbrass 1,synthbrass 2,soprano sax,alto sax,' +
+    'tenor sax,baritone sax,oboe,english horn,bassoon,clarinet,piccolo,flute,recorder,pan flute,' +
+    'blown bottle,shakuhachi,whistle,ocarina,lead 1 (square),lead 2 (sawtooth),lead 3 (calliope),' +
+    'lead 4 (chiff),lead 5 (charang),lead 6 (voice),lead 7 (fifths),lead 8 (bass+lead),' +
+    'pad 1 (new age),pad 2 (warm),pad 3 (polysynth),pad 4 (choir),pad 5 (bowed),pad 6 (metallic),' +
+    'pad 7 (halo),pad 8 (sweep),fx 1 (rain),fx 2 (soundtrack),fx 3 (crystal),fx 4 (atmosphere),' +
+    'fx 5 (brightness),fx 6 (goblins),fx 7 (echoes),fx 8 (sci-fi),sitar,banjo,shamisen,koto,kalimba,' +
+    'bagpipe,fiddle,shanai,tinkle bell,agogo,steel drums,woodblock,taiko drum,melodic tom,synth drum,' +
+    'reverse cymbal,guitar fret noise,breath noise,seashore,bird tweet,telephone ring,helicopter,' +
+    'applause,gunshot'
+  ).split(',')
+
+  function instrumentName(program) {
+    return INSTRUMENTS[program] ?? `program ${program}`
+  }
+
+  /** What a track plays, for the player's list. */
+  function trackInstruments(track) {
+    const names = track.programs.map(instrumentName)
+    if (track.channels.includes(DRUMS)) names.push('drums')
+    return names.join(', ')
+  }
+
+  // ---- voices ----------------------------------------------------------------------
+
+  // A timbre is a list of harmonic amplitudes and an envelope. `decay` makes a
+  // struck or plucked sound, dying away at that rate (seconds to a tenth, for
+  // middle C; higher notes die sooner); without it the note is held at `sustain`.
+  const VOICES = {
+    piano: { harmonics: [1, 0.55, 0.3, 0.16, 0.1, 0.05, 0.03], attack: 0.004, decay: 1.6, release: 0.18, bright: 7 },
+    mallet: { harmonics: [1, 0, 0, 0.45, 0, 0, 0, 0, 0, 0.18], attack: 0.002, decay: 0.7, release: 0.3, bright: 12 },
+    organ: { harmonics: [1, 0.7, 0.5, 0.35, 0, 0.2, 0, 0.15], attack: 0.012, sustain: 0.8, release: 0.06 },
+    pluck: { harmonics: [1, 0.6, 0.4, 0.25, 0.18, 0.1, 0.07, 0.04], attack: 0.003, decay: 1.0, release: 0.12, bright: 6 },
+    bass: { harmonics: [1, 0.6, 0.25, 0.12, 0.05], attack: 0.006, decay: 1.4, release: 0.1, bright: 5 },
+    strings: { harmonics: [1, 0.55, 0.38, 0.27, 0.2, 0.14, 0.1, 0.07, 0.05], attack: 0.07, sustain: 0.85, release: 0.22 },
+    voice: { harmonics: [1, 0.4, 0.22, 0.3, 0.1, 0.04], attack: 0.08, sustain: 0.85, release: 0.25 },
+    brass: { harmonics: [1, 0.8, 0.65, 0.5, 0.38, 0.26, 0.17, 0.1, 0.06], attack: 0.035, sustain: 0.8, release: 0.12 },
+    reed: { harmonics: [1, 0.12, 0.6, 0.08, 0.35, 0.05, 0.18, 0.03, 0.08], attack: 0.025, sustain: 0.85, release: 0.1 },
+    flute: { harmonics: [1, 0.3, 0.08, 0.04], attack: 0.045, sustain: 0.9, release: 0.12 },
+    lead: { harmonics: [1, 0.5, 0.33, 0.25, 0.2, 0.17, 0.14, 0.12, 0.11, 0.1], attack: 0.01, sustain: 0.75, release: 0.1 },
+    pad: { harmonics: [1, 0.35, 0.2, 0.1, 0.05], attack: 0.25, sustain: 0.85, release: 0.6 },
+  }
+
+  /** The timbre of a General MIDI program: its family decides, with a few exceptions. */
+  function voiceOf(program) {
+    if (program === 45 || program === 46) return 'pluck' // pizzicato strings, harp
+    if (program === 47) return 'bass' // timpani
+    if (program === 55) return 'piano' // orchestra hit
+    if (program >= 72 && program <= 79) return 'flute'
+    return (
+      ['piano', 'mallet', 'organ', 'pluck', 'bass', 'strings', 'voice', 'brass', 'reed', 'flute',
+        'lead', 'pad', 'pad', 'pluck', 'mallet', 'pad'][program >> 3] ?? 'piano'
+    )
+  }
+
+  // Channel 10: `tone` is a sine that drops from `from` to `to` Hz, `noise` a
+  // filtered burst. Both die away within `length` seconds.
+  const DRUM_SOUNDS = {
+    kick: { tone: { from: 150, to: 45 }, length: 0.28, level: 1 },
+    snare: { tone: { from: 220, to: 160 }, noise: { type: 'bandpass', frequency: 2200 }, length: 0.2, level: 0.8 },
+    tom: { tone: { from: 1, to: 0.6 }, length: 0.32, level: 0.85 },
+    hat: { noise: { type: 'highpass', frequency: 7500 }, length: 0.05, level: 0.4 },
+    openHat: { noise: { type: 'highpass', frequency: 7000 }, length: 0.35, level: 0.4 },
+    cymbal: { noise: { type: 'highpass', frequency: 5000 }, length: 1.2, level: 0.45 },
+    click: { noise: { type: 'bandpass', frequency: 3500 }, length: 0.04, level: 0.5 },
+  }
+  const TOMS = { 41: 80, 43: 100, 45: 125, 47: 150, 48: 180, 50: 215 }
+
+  /** The sound of a General MIDI percussion key, and the pitch of a tom. */
+  function drumOf(key) {
+    if (key === 35 || key === 36) return { sound: 'kick' }
+    if (key === 38 || key === 40) return { sound: 'snare' }
+    if (key in TOMS) return { sound: 'tom', pitch: TOMS[key] }
+    if (key === 42 || key === 44) return { sound: 'hat' }
+    if (key === 46) return { sound: 'openHat' }
+    if ([49, 51, 52, 53, 55, 57, 59].includes(key)) return { sound: 'cymbal' }
+    return { sound: 'click' }
+  }
+
+  function frequencyOf(key, detune = 0) {
+    return 440 * 2 ** ((key - 69 + detune / 100) / 12)
+  }
+
+  // ---- synthesizer -------------------------------------------------------------------
+
+  const NOTE_LEVEL = 0.35 // one note at full velocity, before the compressor
+  // Choir aahs, voice oohs, synth voice: a line of them is sung, one tone gliding
+  // from note to note in GLIDE seconds, not struck again (D150).
+  const SUNG = new Set([52, 53, 54])
+  const GLIDE = 0.07
+  const SILENCE = 0.0001 // what an exponential ramp can end on
+
+  /**
+   * Plays notes on a BaseAudioContext, an OfflineAudioContext included. Every
+   * note is its own oscillator → (filter) → envelope, into a bus per track and
+   * channel that pans and sets the track's volume, into one compressor so that
+   * a full chord does not clip.
+   */
+  class Synth {
+    constructor(context, volumes = new Map()) {
+      this.context = context
+      this.waves = new Map()
+      this.buses = new Map()
+      /** Track → its volume, 0–2; 1 when not there. */
+      this.volumes = volumes
+      this.output = context.createGain()
+      const compressor = context.createDynamicsCompressor()
+      // Set as a limiter: a tutti chord is twenty notes at once.
+      compressor.threshold.value = -24
+      compressor.knee.value = 12
+      compressor.ratio.value = 20
+      compressor.attack.value = 0.002
+      compressor.release.value = 0.2
+      this.master = context.createGain()
+      this.output.connect(compressor).connect(this.master).connect(context.destination)
+      this.open()
+    }
+
+    /** The whole music's volume, briefly, so that a step does not click. */
+    set volume(value) {
+      this.master.gain.setTargetAtTime(value, this.context.currentTime, 0.02)
+    }
+
+    /** Sets track `track`'s volume (0–2), what sounds now included. */
+    setTrackVolume(track, volume) {
+      this.volumes.set(track, volume)
+      const now = this.context.currentTime
+      for (const bus of this.buses.values()) {
+        // Briefly, so that a dragged slider does not click.
+        if (bus.track === track) bus.volume.gain.setTargetAtTime(volume, now, 0.02)
+      }
+    }
+
+    /** Schedules `note` to begin at context time `when`, `skipped` seconds into it. */
+    play(note, when, skipped = 0) {
+      const remaining = note.duration - skipped
+      if (note.channel === DRUMS) {
+        if (skipped === 0) this.drum(note, when)
+        return
+      }
+      const voice = VOICES[voiceOf(note.program)]
+      // A struck note that is mostly over is not worth starting in the middle.
+      if (remaining <= 0 || (voice.decay && skipped > 0.05)) return
+
+      const { context } = this
+      const frequency = frequencyOf(note.key, note.detune)
+      const peak = NOTE_LEVEL * note.velocity ** 1.5 * note.gain
+      // The release takes over from whatever the envelope is doing, so it must
+      // begin after the attack: a grace note would otherwise never sound.
+      const off = when + Math.max(remaining, voice.attack + 0.01)
+      const end = off + voice.release
+      const sung = SUNG.has(note.program)
+      const lineKey = note.track * 16 + note.channel
+      const line = sung && note.legato && skipped === 0 ? this.lines.get(lineKey) : undefined
+      if (line && Math.abs(line.off - when) < 0.005) {
+        this.glide(line, note, when, off, end, frequency, peak * voice.sustain, voice)
+        return
+      }
+
+      const oscillator = context.createOscillator()
+      oscillator.setPeriodicWave(this.wave(voice))
+      oscillator.frequency.value = frequency
+
+      const envelope = context.createGain()
+      const level = envelope.gain
+      level.setValueAtTime(0, when)
+      level.linearRampToValueAtTime(peak, when + voice.attack)
+      if (voice.decay) {
+        // High strings ring shorter than low ones.
+        const decay = voice.decay * 2 ** ((60 - note.key) / 24)
+        level.setTargetAtTime(peak * 0.02, when + voice.attack, decay / 2.3)
+      } else {
+        level.setTargetAtTime(peak * voice.sustain, when + voice.attack, 0.08)
+      }
+      level.setTargetAtTime(0, off, voice.release / 4)
+
+      let source = oscillator
+      if (voice.bright) {
+        // The upper partials of a struck string go first.
+        const filter = context.createBiquadFilter()
+        filter.type = 'lowpass'
+        filter.Q.value = 0.5
+        const open = Math.min(frequency * voice.bright * (0.5 + note.velocity), 16000)
+        filter.frequency.setValueAtTime(open, when)
+        filter.frequency.setTargetAtTime(Math.min(frequency * 2, open), when, 0.35)
+        source = oscillator.connect(filter)
+      }
+      source.connect(envelope).connect(this.bus(note, when))
+      oscillator.start(when)
+      oscillator.stop(end)
+      oscillator.onended = () => envelope.disconnect()
+      if (sung) this.lines.set(lineKey, { oscillator, level, off, frequency, key: note.key })
+    }
+
+    /**
+     * Carries a sung line's tone on to `note` at `when`: its release is called
+     * off, its pitch glides to the new one, and a syllable on the same pitch
+     * dips the level briefly so that it is heard as a new one.
+     */
+    glide(line, note, when, off, end, frequency, held, voice) {
+      const { oscillator, level } = line
+      const pitch = oscillator.frequency
+      // The tone is already on this track and channel's bus; a pan the note brings still applies.
+      this.bus(note, when)
+      level.cancelScheduledValues(Math.min(when, line.off))
+      pitch.cancelScheduledValues(when)
+      if (note.key === line.key) {
+        level.setTargetAtTime(held * 0.55, when, 0.015)
+        level.setTargetAtTime(held, when + 0.05, 0.03)
+      } else {
+        level.setTargetAtTime(held, when, 0.05)
+        pitch.setValueAtTime(line.frequency, when)
+        pitch.exponentialRampToValueAtTime(frequency, when + Math.min(GLIDE, (off - when) / 3))
+      }
+      level.setTargetAtTime(0, off, voice.release / 4)
+      // A later stop() replaces the one before (Web Audio's AudioScheduledSourceNode).
+      oscillator.stop(end)
+      Object.assign(line, { off, frequency, key: note.key })
+    }
+
+    /** Silences everything scheduled and sounding; later notes go to a new output. */
+    stop() {
+      const { generation, context } = this
+      generation.gain.setTargetAtTime(0, context.currentTime, 0.01)
+      // After the fade. A closed or offline context simply never gets here.
+      setTimeout(() => generation.disconnect(), 100)
+      this.open()
+    }
+
+    open() {
+      this.generation = this.context.createGain()
+      this.generation.connect(this.output)
+      this.buses.clear()
+      /** Track and channel → the tone its sung line is carried on (D150). */
+      this.lines = new Map()
+    }
+
+    bus(note, when) {
+      const key = note.track * 16 + note.channel
+      let bus = this.buses.get(key)
+      if (!bus) {
+        bus = { node: this.context.createStereoPanner(), volume: this.context.createGain(), track: note.track, pan: undefined }
+        bus.volume.gain.value = this.volumes.get(note.track) ?? 1
+        bus.node.connect(bus.volume).connect(this.generation)
+        this.buses.set(key, bus)
+      }
+      if (bus.pan !== note.pan) {
+        bus.node.pan.setValueAtTime(note.pan, when)
+        bus.pan = note.pan
+      }
+      return bus.node
+    }
+
+    wave(voice) {
+      if (!this.waves.has(voice)) {
+        const imag = new Float32Array([0, ...voice.harmonics])
+        this.waves.set(voice, this.context.createPeriodicWave(new Float32Array(imag.length), imag))
+      }
+      return this.waves.get(voice)
+    }
+
+    drum(note, when) {
+      const { context } = this
+      const { sound, pitch = 1 } = drumOf(note.key)
+      const { tone, noise, length, level } = DRUM_SOUNDS[sound]
+      const envelope = context.createGain()
+      envelope.gain.setValueAtTime(NOTE_LEVEL * 1.6 * level * note.velocity ** 1.5 * note.gain, when)
+      envelope.gain.exponentialRampToValueAtTime(SILENCE, when + length)
+      envelope.connect(this.bus(note, when))
+      const sources = []
+      if (tone) {
+        const oscillator = context.createOscillator()
+        oscillator.frequency.setValueAtTime(tone.from * pitch, when)
+        oscillator.frequency.exponentialRampToValueAtTime(tone.to * pitch, when + length)
+        oscillator.connect(envelope)
+        sources.push(oscillator)
+      }
+      if (noise) {
+        const burst = context.createBufferSource()
+        burst.buffer = this.noise()
+        burst.loop = true
+        const filter = context.createBiquadFilter()
+        filter.type = noise.type
+        filter.frequency.value = noise.frequency
+        burst.connect(filter).connect(envelope)
+        sources.push(burst)
+      }
+      for (const source of sources) {
+        source.start(when)
+        source.stop(when + length)
+      }
+      sources[0].onended = () => envelope.disconnect()
+    }
+
+    noise() {
+      if (!this.noiseBuffer) {
+        const { sampleRate } = this.context
+        this.noiseBuffer = this.context.createBuffer(1, sampleRate / 2, sampleRate)
+        const samples = this.noiseBuffer.getChannelData(0)
+        for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1
+      }
+      return this.noiseBuffer
+    }
+  }
+
+  // ---- player -------------------------------------------------------------------------
+
+  const LOOKAHEAD = 0.4 // seconds of notes handed to the audio clock in advance
+  const TICK_MS = 50
+  const LEAD_IN = 0.06 // between "play" and the first sample, so that beat one is not clipped
+  // How long the audio device is kept with nothing playing (D151). WebKit's ring
+  // buffer of about 2 s must play out first, or the end of the music would sound
+  // on the next play; beyond that it spares a pause of a few seconds a restart.
+  const REST_MS = 10000
+  const GESTURE_MS = 300 // how long a resume may take where it may be waiting for a click
+  const RESUME_MS = 5000 // and where sound is allowed: 550 ms measured on a Bluetooth amp
+  const WIRELESS = 0.08 // seconds of output latency above which the output is not a wired one
+  const WIRELESS_START_MS = 450 // an A2DP stream took 431 ms to restart, on a clock already running
+
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  /** Index of the first note that begins at or after `time`. */
+  function firstNoteFrom(notes, time) {
+    let low = 0
+    let high = notes.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if (notes[middle].time < time) low = middle + 1
+      else high = middle
+    }
+    return low
+  }
+
+  /**
+   * Asks to be played as music. Safari plays Web Audio as `ambient` sound by
+   * default: silent while an iPhone's ring switch is on silent, and stopped
+   * in the background. `playback` is heard through both (iOS 17.5 for the
+   * background). Safari 16.4 and later have `navigator.audioSession`; other
+   * browsers do not, and nothing changes there.
+   */
+  function playbackSession() {
+    const session = globalThis.navigator?.audioSession
+    if (!session || session.type === 'playback') return
+    try {
+      session.type = 'playback'
+    } catch {
+      // Refused: the default is still heard with the switch off.
+    }
+  }
+
+  /** `m:ss`, the way a player shows a position; before the music (Karaoke's silence, D149) `-m:ss`, counting down. */
+  function formatTime(seconds) {
+    const at = Number.isFinite(seconds) ? seconds : 0
+    const whole = at < 0 ? Math.ceil(-at) : Math.floor(at)
+    return `${at < 0 && whole > 0 ? '-' : ''}${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+  }
+
+  /**
+   * Plays one parsed file. `state` is 'stopped' (at the start), 'playing' or
+   * 'paused'; `onChange` hears of every change of state and, while playing, of
+   * the position about ten times a second. The AudioContext is created on the
+   * first play(), which a webview only allows once the user has clicked in it:
+   * play() resolves with false, and changes nothing, when it was not allowed.
+   * It is suspended a while after the music stops, and resumed by the next
+   * play(): a running context fell further behind the longer it idled (D151).
+   */
+  class Player {
+    constructor(options = {}) {
+      this.createContext = options.createContext ?? (() => new AudioContext())
+      this.onChange = options.onChange ?? (() => {})
+      this.midi = undefined
+      this.state = 'stopped'
+      this.offset = 0 // position of the music at `startedAt`, or while not playing
+      this.startedAt = 0
+      this.next = 0
+      this.timer = undefined
+      this.ticks = 0
+      this.volumes = new Map()
+      this.masterVolume = 1
+      this.restTimer = undefined
+      this.asleep = undefined // our suspend, as a promise, until a play has the clock running again
+      this.waking = undefined // the attempt waiting for the audio clock
+      this.refused = false
+    }
+
+    get duration() {
+      return this.midi?.duration ?? 0
+    }
+
+    /**
+     * Where the music is as it is heard, which is what the time, the slider and
+     * the notes marked on the pages show: the audio clock less the output
+     * latency (DECISIONS D51). Before the first sample arrives it is where
+     * playback began.
+     */
+    get position() {
+      if (this.state !== 'playing') return this.offset
+      return Math.min(Math.max(this.scheduled - this.latency, this.offset), this.duration)
+    }
+
+    /**
+     * Where the music is on the audio clock, which the notes are scheduled
+     * against: `latency` ahead of what is heard. What was rendered up to here
+     * still sounds after a pause, so a pause goes on from here.
+     */
+    get scheduled() {
+      if (this.state !== 'playing') return this.offset
+      return this.offset + Math.max(this.context.currentTime - this.startedAt, 0)
+    }
+
+    /**
+     * `scheduled`, but through the lead-in of a play() or a seek it counts up
+     * to the music's start instead of waiting there: the place to keep a
+     * recording to, which starts moving when it is sent (DECISIONS D167).
+     */
+    get clock() {
+      if (this.state !== 'playing') return this.offset
+      return this.offset + this.context.currentTime - this.startedAt
+    }
+
+    /**
+     * Seconds from a sample leaving the audio graph to its being heard: large
+     * on Bluetooth (0.16 s measured with Bluetooth headphones on macOS), 0 where the browser
+     * does not say. Read every time, as the output device may change.
+     */
+    get latency() {
+      const latency = (this.context?.outputLatency ?? 0) + (this.context?.baseLatency ?? 0)
+      return Number.isFinite(latency) && latency > 0 ? latency : 0
+    }
+
+    /**
+     * Whether the last play() was refused, no sound before a click, says the
+     * browser, or the system took the audio away. Not our own suspend, nor a
+     * play that was called off while it waited.
+     */
+    get suspended() {
+      return this.refused && this.context?.state !== 'running'
+    }
+
+    /** Whether a play() is waiting for the audio clock; it starts by itself. */
+    get starting() {
+      return this.waking !== undefined && this.waking === this.attempt
+    }
+
+    /** Replaces the music, stopping what plays; undefined unloads. */
+    load(midi) {
+      this.halt()
+      this.midi = midi
+      this.offset = 0
+      this.state = 'stopped'
+      this.onChange()
+    }
+
+    async play() {
+      if (!this.midi || this.state === 'playing') return this.state === 'playing'
+      playbackSession()
+      if (!this.context) {
+        this.context = this.createContext()
+        // A phone call, another app or the page going into the background
+        // stops the audio clock (Safari's and, since Chrome 136, Chrome's
+        // `interrupted`): show it as paused, and the next ▶ goes on from there.
+        this.context.addEventListener?.('statechange', () => {
+          const running = this.context.state === 'running'
+          if (this.midi && this.state === 'playing' && !running) {
+            this.pause()
+            this.refused = true
+          }
+          // Running with nothing to play: a resume that came too late, or the
+          // system giving the audio back.
+          if (running && this.state !== 'playing' && !this.starting) this.rest()
+        })
+      }
+      if (!this.synth) {
+        this.synth = new Synth(this.context, this.volumes)
+        this.synth.master.gain.value = this.masterVolume
+      }
+      clearTimeout(this.restTimer)
+      this.refused = false
+      const attempt = (this.attempt = (this.attempt ?? 0) + 1)
+      if (this.asleep || this.context.state !== 'running') {
+        this.waking = attempt
+        await this.wake()
+      }
+      // Stopped, reloaded or started again while waiting.
+      if (attempt !== this.attempt || !this.midi || this.state === 'playing') {
+        return this.state === 'playing'
+      }
+      this.waking = undefined
+      if (this.context.state !== 'running') {
+        this.refused = true
+        return false
+      }
+
+      this.asleep = undefined
+      if (this.offset >= this.duration) this.offset = 0
+      this.state = 'playing'
+      this.startedAt = this.context.currentTime + LEAD_IN
+      this.next = firstNoteFrom(this.midi.notes, this.offset)
+      // Held notes that a seek landed in.
+      for (let i = 0; i < this.next; i++) {
+        const note = this.midi.notes[i]
+        if (note.time + note.duration > this.offset) {
+          this.synth.play(note, this.startedAt, this.offset - note.time)
+        }
+      }
+      this.timer = setInterval(() => this.tick(), TICK_MS)
+      this.tick()
+      this.onChange()
+      return true
+    }
+
+    pause() {
+      if (this.state !== 'playing') {
+        if (this.starting) this.halt()
+        return
+      }
+      this.offset = Math.min(this.scheduled, this.duration)
+      this.halt()
+      this.state = 'paused'
+      this.onChange()
+    }
+
+    /** Back to the start. */
+    stop() {
+      this.halt()
+      this.offset = 0
+      this.state = 'stopped'
+      this.onChange()
+    }
+
+    /**
+     * Moves to `seconds`; what was playing goes on from there. Below 0, up to a
+     * minute, is silence before the music: Karaoke's lead-in (DECISIONS D149).
+     */
+    async seek(seconds) {
+      const playing = this.state === 'playing' || this.starting
+      this.halt()
+      this.offset = Math.min(Math.max(Number(seconds) || 0, -60), this.duration)
+      this.state = this.offset === 0 && !playing ? 'stopped' : 'paused'
+      if (playing) await this.play()
+      else this.onChange()
+    }
+
+    /**
+     * Track `track`'s volume: 1 as the file has it, 0 silent, up to 2. It
+     * applies at once, to what sounds too, and outlasts load().
+     */
+    trackVolume(track) {
+      return this.volumes.get(track) ?? 1
+    }
+
+    /** The whole music's volume, 0–1, over each track's; it applies at once and outlasts load(). */
+    get volume() {
+      return this.masterVolume
+    }
+
+    setVolume(volume) {
+      this.masterVolume = Math.min(Math.max(Number(volume) || 0, 0), 1)
+      if (this.synth) this.synth.volume = this.masterVolume
+    }
+
+    setTrackVolume(track, volume) {
+      const value = Math.min(Math.max(Number(volume) || 0, 0), 2)
+      if (this.synth) this.synth.setTrackVolume(track, value)
+      else this.volumes.set(track, value)
+    }
+
+    /** Frees the audio device; the player cannot be used afterwards. */
+    dispose() {
+      this.halt()
+      clearTimeout(this.restTimer)
+      this.midi = undefined
+      void this.context?.close().catch(() => {})
+    }
+
+    halt() {
+      this.attempt = (this.attempt ?? 0) + 1
+      clearInterval(this.timer)
+      this.timer = undefined
+      if (this.state === 'playing') this.synth.stop()
+      if (this.context) this.rest()
+    }
+
+    /** Lets the audio device go once nothing has played for a while; play() calls this off. */
+    rest() {
+      clearTimeout(this.restTimer)
+      this.restTimer = setTimeout(() => this.sleep(), REST_MS)
+    }
+
+    sleep() {
+      const { context } = this
+      if (this.state === 'playing' || this.starting) return
+      if (context.state !== 'running' || !context.suspend) return
+      this.asleep = Promise.resolve(context.suspend()).catch(() => {})
+    }
+
+    /**
+     * Gets the audio clock going, or gives up. A resume never settles while a
+     * gesture is awaited, so the wait is short unless sound is known to be
+     * allowed; one the system holds back is not waited for either. A suspend
+     * still on its way lands first: the context says `running` until it has.
+     */
+    async wake() {
+      const { context, asleep } = this
+      const allowed = asleep || (context.state === 'suspended' && globalThis.navigator?.userActivation?.hasBeenActive)
+      const resume = () => context.resume().catch(() => {})
+      await Promise.race([asleep ? asleep.then(resume) : resume(), delay(allowed ? RESUME_MS : GESTURE_MS)])
+      // Waited for here, not in the lead-in: a recording that follows the score
+      // must not start that far ahead of it, or lose its start to the same stream.
+      if (asleep && context.state === 'running' && this.latency >= WIRELESS) await delay(WIRELESS_START_MS)
+    }
+
+    tick() {
+      const { notes } = this.midi
+      const scheduled = this.scheduled
+      // Not before the end is heard, or the last notes would lose their marks.
+      if (scheduled - this.latency >= this.duration) {
+        this.stop()
+        return
+      }
+      const horizon = scheduled + LOOKAHEAD
+      while (this.next < notes.length && notes[this.next].time < horizon) {
+        const note = notes[this.next++]
+        this.synth.play(note, this.startedAt + note.time - this.offset)
+      }
+      if (++this.ticks % 2 === 0) this.onChange()
+    }
+  }
+
+  const api = {
+    parseMidi, instrumentName, trackInstruments, voiceOf, drumOf, frequencyOf,
+    firstNoteFrom, formatTime, momentTime, Synth, Player,
+  }
+  if (typeof module === 'object') module.exports = api
+  else globalThis.LilyMidi = api
+})()

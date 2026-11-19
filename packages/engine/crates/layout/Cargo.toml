@@ -1,0 +1,21 @@
+[package]
+name = "lily-engine-layout"
+description = "The engine's layout: LilyPond's stencils, boxes and transforms with their Scheme face, then fonts, markup, grobs and their layout (docs/research/wasm-engine/05-layout.md, 01-reference-map.md §3.7; D104)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc, as the crates below it. The music crate's values come
+# before layout's in a VM's (lily), and crates/fonts' packs are what its font
+# metrics read (D104). crates/skyline's skylines are what the grobs' default
+# skylines are built into (D111), charged to layout's row as D104 charges
+# the crate. libm for LilyPond's sin, atan2, sqrt and fmod, and
+# for the multiply-adds that clang fuses.
+[dependencies]
+lily-engine-fonts = { path = "../fonts" }
+lily-engine-music = { path = "../music" }
+lily-engine-scheme = { path = "../scheme" }
+lily-engine-skyline = { path = "../skyline" }
+libm = { version = "0.2.16", default-features = false }

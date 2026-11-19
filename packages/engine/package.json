@@ -1,0 +1,25 @@
+{
+  "name": "lily-engine",
+  "description": "Our LilyPond engine in WebAssembly (DECISIONS D56).",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "sizes": "node scripts/sizes.mjs",
+    "corpus": "node tools/corpus/fetch.mjs",
+    "capture": "node tools/compare/capture.mjs",
+    "score": "node tools/compare/score.mjs",
+    "differential": "node tools/compare/differential.mjs",
+    "gen:stderr-fixture": "node --no-warnings tools/compare/gen-stderr-fixture.mjs",
+    "packs": "node tools/packs/build.mjs && node tools/packs/text.mjs",
+    "test:rust": "cargo +stable test --workspace",
+    "test:tools": "node tools/examples.mjs && node --test 'tools/**/test/*.test.mjs'",
+    "lint:rust": "cargo +stable fmt --all --check && cargo +stable clippy --workspace --all-targets -- -D warnings",
+    "test": "npm run test:rust && npm run test:tools"
+  },
+  "author": {
+    "name": "Oleg Arshinskii",
+    "email": "velet592@gmail.com"
+  }
+}

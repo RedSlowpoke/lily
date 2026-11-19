@@ -1,0 +1,14 @@
+[package]
+name = "lily-engine-skyline"
+description = "The engine's skylines: LilyPond's Skyline and stencil-integral.cc's outline-to-skyline procedure over the packs' glyph outlines (docs/research/wasm-engine/06-output.md §5.1, W2)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc. libm for the fused multiply-adds that clang contracts in
+# skyline.cc and for Offset::length's hypot, which core does not have.
+[dependencies]
+lily-engine-fonts = { path = "../fonts" }
+libm = { version = "0.2.16", default-features = false }

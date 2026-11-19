@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview edits</title>
+<link rel="stylesheet" href="preview.css">
+<style>
+  /* What VS Code's theme gives the webview; preview.css reads only these. */
+  :root {
+    --vscode-editor-background: #fff;
+    --vscode-editor-foreground: #111;
+    --vscode-editorWidget-background: #f3f3f3;
+    --vscode-editorWidget-foreground: #111;
+  }
+  body { padding-bottom: 88px; }
+  #bench {
+    position: fixed; z-index: 2; left: 0; right: 0; bottom: 0; box-sizing: border-box;
+    padding: 6px 16px; background: #f3f3f3; color: #111; border-top: 1px solid #ccc;
+    font: 13px/1.4 system-ui, sans-serif;
+  }
+  #bench button, #bench select { font: inherit; padding: 6px 10px; margin: 0 6px 4px 0; }
+  #bench output { display: block; white-space: pre-wrap; font: 12px/1.3 ui-monospace, monospace; }
+</style>
+</head>
+<body data-colors="paper">
+<!-- preview.html's elements as the extension's panel.ts writes them (previewHtml). -->
+<div id="progress" hidden></div>
+<main id="pages"></main>
+<p id="empty"></p>
+<p id="note" role="status" hidden></p>
+<div id="toolbar" role="toolbar" aria-label="Preview">
+<button id="refresh" type="button">&#x21bb;</button>
+<span id="pager" class="group" hidden>
+<button id="page-previous" type="button">&lsaquo;</button>
+<span id="page-label"></span>
+<button id="page-next" type="button">&rsaquo;</button>
+</span>
+<span class="spacer"></span>
+<span class="group">
+<button id="zoom-out" type="button">&minus;</button>
+<button id="zoom-fit" type="button">Fit</button>
+<button id="zoom-in" type="button">+</button>
+</span>
+<span class="spacer"></span>
+<span id="player" class="group">
+<button id="midi-play" type="button" disabled>&#x25B6;&#xFE0E;</button>
+<button id="midi-stop" type="button" disabled>&#x25A0;&#xFE0E;</button>
+<input id="midi-seek" type="range" min="0" max="1000" value="0" disabled>
+<span id="midi-time"></span>
+<span id="midi-bar"></span>
+</span>
+<span class="spacer"></span>
+<span class="group">
+<button id="export-pdf" type="button">PDF</button>
+<button id="export-midi" type="button">MIDI</button>
+</span>
+</div>
+<div id="bench">
+<select id="set" aria-label="Pages">
+<option value="lilypond">LilyPond's pages</option>
+<option value="spike">The spike's pages</option>
+</select><button id="base" type="button" disabled>Revision 1</button><button id="E1" type="button" disabled>E1</button><button id="E2" type="button" disabled>E2</button><button id="all" type="button" disabled>all</button>
+<output id="log">Loading L532…</output>
+</div>
+<!-- The stub acquireVsCodeApi first: preview.js calls it as it loads. -->
+<script src="preview-page.js"></script>
+<script src="midi.js"></script>
+<script src="preview.js"></script>
+</body>
+</html>

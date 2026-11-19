@@ -1,0 +1,310 @@
+import * as assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import * as fs from 'node:fs/promises'
+import * as os from 'node:os'
+import * as path from 'node:path'
+import { after, before, test } from 'node:test'
+import { promisify } from 'node:util'
+import { CompileService } from '../../src/compile/compiler'
+import { locateLilyPond } from '../../src/compile/locate'
+import { parseStderr } from '../../src/diagnostics/parse'
+
+let scratch: string
+let service: CompileService
+before(async () => {
+  await locateLilyPond() // This suite must not silently skip acceleration coverage.
+  scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'lily-live-'))
+  service = new CompileService({ tmpRoot: scratch, runtimeDir: path.resolve('../common/runtime') })
+})
+after(async () => { await service?.dispose(); if (scratch) await fs.rm(scratch, { recursive: true, force: true }) })
+
+const content = async (files: string[]) => Promise.all(files.map(file => fs.readFile(file)))
+
+test('snapshot paths preserve ordinary output for Cyrillic and URI-reserved filenames', async () => {
+  const rootFile = path.join(scratch, "Партитура #?&'()!~.ly")
+  const text = String.raw`\version "2.26.0"
+\score { \new Staff { c'4 d' e' f' } \layout {} \midi {} }
+`
+  await fs.writeFile(rootFile, text)
+  const disk = await service.compile({ rootFile, acceleration: 'off' })
+  assert.equal(disk.ok, true, disk.stderr)
+  assert.equal(disk.stderr, '')
+  const reference = await content([...disk.pages, ...disk.midi])
+  const snapshot = await service.compile({ rootFile, buffers: new Map([[rootFile, text]]), acceleration: 'auto' })
+  assert.equal(snapshot.ok, true, snapshot.stderr)
+  assert.equal(snapshot.engine, 'warm', snapshot.fallback)
+  assert.deepEqual(await content([...snapshot.pages, ...snapshot.midi]), reference)
+})
+
+for (const fixture of ['simple.ly', 'hello.ly', 'pages.ly', '../e2e/workspace/score.ly']) {
+  test(`cache and isolated warm worker preserve SVG, links and MIDI: ${fixture}`, async () => {
+    const rootFile = path.resolve('test/fixtures', fixture)
+    const plain = await service.compile({ rootFile, acceleration: 'off' })
+    assert.equal(plain.ok, true, plain.stderr)
+    const reference = await content([...plain.pages, ...plain.midi])
+    for (const acceleration of ['cache', 'auto', 'auto'] as const) {
+      const fast = await service.compile({ rootFile, acceleration })
+      assert.equal(fast.ok, true, fast.stderr)
+      assert.equal(fast.stderr, '')
+      assert.equal(fast.engine, acceleration === 'auto' ? 'warm' : 'cache', fast.fallback)
+      assert.deepEqual(await content([...fast.pages, ...fast.midi]), reference)
+    }
+  })
+}
+
+test('multiple books, sizes, tablature, drums, ligatures and music glyphs in markup match', async () => {
+  const rootFile = path.join(scratch, 'varied.ly')
+  await fs.writeFile(rootFile, String.raw`\version "2.26.0"
+#(set-global-staff-size 18)
+\header { title = "office — ffi Áλ" tagline = ##f }
+\book {
+  \bookOutputSuffix "guitar"
+  \markup { \musicglyph "accidentals.sharp" \fontsize #5 \musicglyph "noteheads.s0" }
+  \score { << \new Staff \relative c' { c4 d e f } \new TabStaff \relative c' { c4 d e f } >> \layout {} \midi {} }
+}
+\book {
+  \bookOutputSuffix "drums"
+  \score { \new DrumStaff \drummode { bd4 sn hh cymc } \layout {} \midi {} }
+}
+`)
+  const baseline = await service.compile({ rootFile, acceleration: 'off' })
+  assert.equal(baseline.ok, true, baseline.stderr)
+  assert.equal(baseline.stderr, '')
+  const expected = await content([...baseline.pages, ...baseline.midi])
+  for (const acceleration of ['cache', 'auto', 'auto'] as const) {
+    const result = await service.compile({ rootFile, acceleration })
+    assert.equal(result.ok, true, result.stderr)
+    assert.equal(result.stderr, '')
+    assert.equal(result.engine, acceleration === 'auto' ? 'warm' : 'cache', result.fallback)
+    assert.deepEqual(await content([...result.pages, ...result.midi]), expected)
+  }
+})
+
+test('font-data caching preserves glyph-string advances, spaces, offsets and size changes', async () => {
+  const rootFile = path.join(scratch, 'glyph-positions.ly')
+  await fs.writeFile(rootFile, String.raw`\version "2.26.0"
+#(let* ((module (resolve-module '(lily output-svg)))
+        (render (module-ref module 'cache-font)))
+   (for-each
+     (lambda (font-name)
+       (let ((font (ly:find-file font-name)))
+         (for-each
+           (lambda (size)
+             (module-set! module 'next-horiz-adv 0.0)
+             (for-each
+               (lambda (glyph)
+                 (display (render font size glyph)))
+               '((1.5 0 0.25 0.5 "f") (0.75 0 0 0 "space")
+                 (1.5 0 -0.5 0 "f") (1.0 0 0 0 "p")))
+             (unless (= (module-ref module 'next-horiz-adv) 4.75)
+               (ly:error "Glyph advance was lost"))
+             (display (render font size "noteheads.s2")))
+           '(4.0 6.0 4.0))))
+     '("emmentaler-20.svg" "emmentaler-26.svg" "emmentaler-20.svg"))
+   (module-set! module 'next-horiz-adv 0.0))
+\markup { \dynamic "sff p" \fontsize #4 \dynamic "sff p" }
+\score { { c'4\pp d'\sfz e'\ff f'\p } \layout {} \midi {} }
+`)
+  const plain = await service.compile({ rootFile, acceleration: 'off' })
+  assert.equal(plain.ok, true, plain.stderr)
+  assert.equal(plain.stderr, '')
+  const reference = await content([...plain.pages, ...plain.midi])
+  for (const acceleration of ['cache', 'auto', 'auto'] as const) {
+    const result = await service.compile({ rootFile, acceleration })
+    assert.equal(result.ok, true, result.stderr)
+    assert.equal(result.stderr, '')
+    assert.equal(result.engine, acceleration === 'auto' ? 'warm' : 'cache', result.fallback)
+    assert.equal(result.stdout, plain.stdout)
+    assert.deepEqual(await content([...result.pages, ...result.midi]), reference)
+  }
+})
+
+test('glyph reuse, only when asked for, defines each glyph once per page and draws what LilyPond draws', async () => {
+  // docs/research/wasm-engine/06-output.md §3: the preview never sets lily-glyph-reuse?.
+  const binary = await locateLilyPond()
+  const rootFile = path.join(scratch, 'reuse.ly')
+  await fs.writeFile(rootFile, String.raw`\version "2.26.0"
+\paper { #(set-paper-size "a7") }
+\markup { \dynamic "sff p" \fontsize #4 \musicglyph "noteheads.s2" }
+\score { \new PianoStaff <<
+  \new Staff { \grace c''8 c''4\pp d''\sfz e''2 | \repeat unfold 12 { c''4 d'' } }
+  \new Staff { \clef bass c1 | \repeat unfold 6 { c2 d } }
+>> }
+`)
+  const glyphCache = path.resolve('../common/runtime/glyph-cache.scm')
+  const compile = async (name: string, reuse: boolean) => {
+    const args = ['--loglevel=WARNING', '--svg', '-dpoint-and-click', '-o', path.join(scratch, name)]
+    if (reuse) args.push('-e', `(begin (define lily-glyph-reuse? #t) (load ${JSON.stringify(glyphCache)}))`)
+    const { stderr } = await promisify(execFile)(binary.path, [...args, rootFile], { cwd: scratch })
+    assert.equal(stderr, '')
+    const pages = (await fs.readdir(scratch)).filter(f => f.startsWith(name) && f.endsWith('.svg')).sort()
+    return Promise.all(pages.map(page => fs.readFile(path.join(scratch, page), 'utf8')))
+  }
+  const plain = await compile('reuse-plain', false)
+  const reused = await compile('reuse-on', true)
+  assert.ok(plain.length > 1, 'a second page defines its glyphs again')
+  assert.equal(reused.length, plain.length)
+  const definition = /<defs><path id="([^"]+)" transform="scale\(([^)]*)\)" d="([^"]*)" fill="currentColor"\/><\/defs>\n/g
+  const use = /<use xlink:href="#([^"]+)"(?: transform="([^"]*)")?\/>\n/g
+  reused.forEach((page, index) => {
+    const defined = new Map<string, [string, string]>()
+    for (const [, id, scale, d] of page.matchAll(definition)) {
+      assert.ok(!defined.has(id), `${id} is defined once on page ${index + 1}`)
+      defined.set(id, [scale, d])
+    }
+    // Drawn in place again, each <use> is the <path> LilyPond writes, byte for byte.
+    const inlined = page.replace(definition, '').replace(use, (_, id: string, translate?: string) => {
+      const [scale, d] = defined.get(id) ?? assert.fail(`${id} is used before its page defines it`)
+      return `<path transform="${translate ? translate + ' ' : ''}scale(${scale})" d="${d}" fill="currentColor"/>\n`
+    })
+    assert.ok(defined.size > 0 && defined.size < [...page.matchAll(use)].length)
+    assert.equal(inlined, plain[index])
+  })
+})
+
+test('unsaved root and nested/absolute includes map links and diagnostic columns to real sources', async () => {
+  const rootFile = path.join(scratch, 'unicode space λ.ly')
+  const part = path.join(scratch, 'part.ily')
+  const nested = path.join(scratch, 'nested.ily')
+  const root = `\\version "2.26.0"\n\\include ${JSON.stringify(part)} { \\music c'4 }\n`
+  await fs.writeFile(rootFile, root)
+  await fs.writeFile(part, 'music = { d\'4 }\n')
+  await fs.writeFile(nested, "music = { e'4 }\n")
+  const buffers = new Map([[rootFile, root], [part, '\\include "nested.ily"\n'], [nested, "music = { f'4 }\n"]])
+  const result = await service.compile({ rootFile, buffers, acceleration: 'auto' })
+  assert.equal(result.ok, true, result.stderr)
+  assert.equal(result.stderr, '')
+  const svg = await fs.readFile(result.pages[0], 'utf8')
+  assert.ok(!svg.includes('/sources/'), 'snapshot paths must not reach the viewer')
+  assert.ok(svg.includes(`textedit://${encodeURI(nested)}:1:10:11`), svg.slice(-2000))
+  const note = root.split('\n')[1].indexOf("c'4")
+  assert.ok(svg.includes(`textedit://${encodeURI(rootFile).replace(/%[\dA-F]{2}/g, escape => escape.toLowerCase())}:2:${note}:${note + 1}`))
+  assert.equal(await fs.readFile(part, 'utf8'), "music = { d'4 }\n", 'never save editors')
+  buffers.set(rootFile, root.replace("c'4", "\\stacato c'4"))
+  const bad = await service.compile({ rootFile, buffers, acceleration: 'auto' })
+  assert.equal(bad.ok, false)
+  const diagnostics = parseStderr(bad.stderr, { rootFile }).map(d => bad.snapshot!.diagnostic(d))
+  assert.ok(diagnostics.some(d => d.file === rootFile && d.column === note + 1 && d.message.includes('stacato')), JSON.stringify(diagnostics))
+})
+
+test('Scheme mutation cannot leak between forked requests', async () => {
+  const rootFile = path.join(scratch, 'isolated.ly')
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n#(module-define! (resolve-module \'(lily)) \'preview-test-leak 42)\n{ c1 }\n')
+  const first = await service.compile({ rootFile, acceleration: 'auto' })
+  assert.equal(first.ok, true, first.stderr)
+  assert.equal(first.engine, 'warm', first.fallback)
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n#(if (module-defined? (resolve-module \'(lily)) \'preview-test-leak) (ly:error "leaked state"))\n{ c1 }\n')
+  const second = await service.compile({ rootFile, acceleration: 'auto' })
+  assert.equal(second.ok, true, second.stderr)
+  assert.equal(second.engine, 'warm', second.fallback)
+})
+
+test('computed includes with dirty buffers fail explicitly; custom options use ordinary spawning', async () => {
+  const rootFile = path.join(scratch, 'computed.ly')
+  const text = '\\version "2.26.0"\n\\include #(string-append "part" ".ily")\n{ \\music }\n'
+  await fs.writeFile(rootFile, text)
+  const unavailable = await service.compile({ rootFile, buffers: new Map([[rootFile, text]]) })
+  assert.equal(unavailable.ok, false)
+  assert.match(unavailable.stderr, /computed/)
+  const result = await service.compile({ rootFile, acceleration: 'auto', extraArgs: ['-dno-point-and-click'] })
+  assert.equal(result.ok, true, result.stderr)
+  assert.equal(result.engine, 'spawn')
+})
+
+test('a crashing score falls back and cannot poison later requests', async () => {
+  const rootFile = path.join(scratch, 'crash.ly')
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n#(primitive-exit 7)\n')
+  const crash = await service.compile({ rootFile, acceleration: 'auto' })
+  assert.equal(crash.ok, false)
+  assert.equal(crash.engine, 'spawn')
+  assert.match(crash.fallback!, /Warm compiler failed/)
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n{ c1 }\n')
+  const recovered = await service.compile({ rootFile, acceleration: 'auto' })
+  assert.equal(recovered.ok, true, recovered.stderr)
+  assert.equal(recovered.engine, 'cache', 'failed worker configurations stay disabled')
+})
+
+test('warm cancellation kills the child and a subsequent request starts cleanly', async () => {
+  const rootFile = path.join(scratch, 'cancel.ly')
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n{ c1 }\n')
+  assert.equal((await service.compile({ rootFile, acceleration: 'auto' })).engine, 'warm')
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n#(sleep 30)\n{ c1 }\n')
+  const running = service.compile({ rootFile, acceleration: 'auto' })
+  const timer = setTimeout(() => service.cancel(rootFile), 100)
+  const result = await running
+  clearTimeout(timer)
+  assert.equal(result.cancelled, true)
+  assert.deepEqual(result.pages, [])
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n{ d1 }\n')
+  const recovered = await service.compile({ rootFile, acceleration: 'auto', extraArgs: ['-I', scratch] })
+  assert.equal(recovered.ok, true, recovered.stderr)
+  assert.equal(recovered.engine, 'warm', recovered.fallback)
+})
+
+test('worker and fallback timeouts are bounded and subsequent compiles recover', async () => {
+  const rootFile = path.join(scratch, 'timeout.ly')
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n{ c1 }\n')
+  await service.compile({ rootFile, acceleration: 'auto' })
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n#(sleep 30)\n{ c1 }\n')
+  const start = performance.now()
+  const result = await service.compile({ rootFile, acceleration: 'auto', timeoutMs: 100 })
+  assert.equal(result.ok, false)
+  assert.match(result.stderr, /timed out/)
+  assert.ok(performance.now() - start < 5000)
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n{ c1 }\n')
+  const recovered = await service.compile({ rootFile, acceleration: 'auto' })
+  assert.equal(recovered.ok, true, recovered.stderr)
+})
+
+test('dirty includes reached through a symlink and relative -I retain their search paths', async () => {
+  const library = path.join(scratch, 'library')
+  await fs.mkdir(library)
+  const part = path.join(library, 'notes.ily')
+  await fs.writeFile(part, "music = { c'1 }\n")
+  const alias = path.join(scratch, 'linked-library')
+  await fs.symlink(library, alias, 'dir')
+  const rootFile = path.join(scratch, 'search.ly')
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n\\include "notes.ily"\n{ \\music }\n')
+  const buffers = new Map([[path.join(alias, 'notes.ily'), "music = { d'1 }\n"]])
+  const result = await service.compile({ rootFile, buffers, acceleration: 'auto', extraArgs: ['-I', 'library'] })
+  assert.equal(result.ok, true, result.stderr)
+  assert.equal(result.engine, 'warm', result.fallback)
+  assert.equal(result.snapshot?.sources.get(part), "music = { d'1 }\n")
+})
+
+test('a score replacing the backend hook retains its override in cached and warm runs', async () => {
+  const rootFile = path.join(scratch, 'override.ly')
+  await fs.writeFile(rootFile, String.raw`\version "2.26.0"
+#(let* ((m (resolve-module '(lily output-svg)))
+        (original (module-ref m 'cache-font)))
+   (module-set! m 'cache-font
+     (lambda (font size glyph)
+       (original font size (if (equal? glyph "noteheads.s2") "noteheads.s0" glyph)))))
+{ c'4 d' e' f' }
+`)
+  const plain = await service.compile({ rootFile, acceleration: 'off' })
+  assert.equal(plain.ok, true, plain.stderr)
+  const reference = await content(plain.pages)
+  for (const acceleration of ['cache', 'auto'] as const) {
+    const result = await service.compile({ rootFile, acceleration })
+    assert.equal(result.ok, true, result.stderr)
+    assert.equal(result.stderr, '')
+    assert.deepEqual(await content(result.pages), reference)
+  }
+})
+
+test('unknown versions spawn normally and replacing the configured binary invalidates the probe', async () => {
+  const binary = await locateLilyPond()
+  const wrapper = path.join(scratch, 'version-wrapper')
+  const rootFile = path.join(scratch, 'version.ly')
+  const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
+  await fs.writeFile(rootFile, '\\version "2.26.0"\n{ c1 }\n')
+  await fs.writeFile(wrapper, `#!/bin/sh\nif [ "$1" = "--loglevel=ERROR" ]; then\n  printf '2.99.0\\n/unknown/backend.scm\\n'\nelse\n  exec ${quote(binary.path)} "$@"\nfi\n`, { mode: 0o700 })
+  const ordinary = await service.compile({ rootFile, lilypondPath: wrapper, acceleration: 'auto' })
+  assert.equal(ordinary.ok, true, ordinary.stderr)
+  assert.equal(ordinary.engine, 'spawn')
+  await fs.writeFile(wrapper, `#!/bin/sh\nexec ${quote(binary.path)} "$@"\n`)
+  const accelerated = await service.compile({ rootFile, lilypondPath: wrapper, acceleration: 'auto' })
+  assert.equal(accelerated.ok, true, accelerated.stderr)
+  assert.equal(accelerated.engine, 'warm', accelerated.fallback)
+})

@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lily Studio</title>
+<meta name="description" content="A small studio for LilyPond scores, on your Mac.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:ital,wght@0,400;0,700;1,400&family=Figtree:wght@400;600&family=Noto+Music&display=swap" rel="stylesheet">
+<!--
+  Lily Studio's home page, https://lily.everyday.fail/ (DECISIONS D124). It is
+  laid out as LilyPond lays out a score's first page: dedication, title,
+  subtitle, poet and composer, then the first system. `npm run upload:site`
+  in packages/studio publishes it.
+-->
+<style>
+  :root {
+    --paper: #ffffff;
+    --ink: #1d1a26;
+    --ink-soft: #5d586b;
+    --staff: #9a95a6;
+    --violet: #6a4ca6;
+    --violet-ink: #4e3482;
+    --rule: #e4e0ec;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #17151d;
+      --ink: #ece8f4;
+      --ink-soft: #a8a2b6;
+      --staff: #6f6a7c;
+      --violet: #b69ce8;
+      --violet-ink: #cdb9f2;
+      --rule: #2e2a38;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 1.125rem/1.6 'Old Standard TT', 'Century Schoolbook', Georgia, serif;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 2px; }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 28px 24px 0;
+  }
+
+  .topline {
+    font: 400 0.875rem/1 Figtree, system-ui, sans-serif;
+    color: var(--ink-soft);
+  }
+  .topline img { width: 28px; height: 28px; vertical-align: middle; margin-right: 8px; }
+
+  /* The score's header block */
+  header.title {
+    margin-top: 72px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    row-gap: 6px;
+  }
+  .dedication {
+    grid-column: 1 / -1;
+    text-align: center;
+    font-style: italic;
+    font-size: 1rem;
+    color: var(--ink-soft);
+  }
+  h1 {
+    grid-column: 1 / -1;
+    text-align: center;
+    margin: 18px 0 0;
+    font-weight: 700;
+    font-size: clamp(3rem, 9vw, 6.25rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    grid-column: 1 / -1;
+    text-align: center;
+    margin: 14px 0 34px;
+    font-size: clamp(1.25rem, 2.6vw, 1.6rem);
+  }
+  .poet, .composer { font-size: 1rem; }
+  .composer { text-align: right; }
+
+  /* The first system */
+  .system {
+    position: relative;
+    margin-top: 40px;
+  }
+  #staff { display: block; width: 100%; height: auto; overflow: visible; }
+  .system .line { stroke: var(--staff); stroke-width: 1; }
+  .system .bar { stroke: var(--ink); stroke-width: 1.2; }
+  .system .bar.final { stroke-width: 4; }
+  .system .clef { font-family: 'Noto Music', serif; fill: var(--ink); }
+  .system .time { font: 700 25px/1 'Old Standard TT', serif; fill: var(--ink); }
+  .note .head { fill: var(--ink); }
+  .note .head.open { fill: none; stroke: var(--ink); stroke-width: 1.8; }
+  .note .stem, .note .flag { stroke: var(--ink); stroke-width: 1.3; fill: none; }
+  .note .dot { fill: var(--ink); }
+  .note text {
+    font: 400 15px/1 'Old Standard TT', serif;
+    fill: var(--ink);
+    text-anchor: middle;
+  }
+  .note .hyphen { stroke: var(--ink); stroke-width: 1; }
+
+  /* The way in */
+  .way {
+    max-width: 34em;
+    margin: 88px auto 0;
+    text-align: center;
+  }
+  .way h2 {
+    margin: 0 0 4px;
+    font-size: 1.75rem;
+    font-weight: 700;
+  }
+  .way .tempo {
+    margin: 0 0 18px;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+  .way p { margin: 0 0 14px; }
+  .button {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 13px 22px;
+    border-radius: 6px;
+    background: var(--violet);
+    color: #fff;
+    font: 600 1rem/1.2 Figtree, system-ui, sans-serif;
+    text-decoration: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .button { color: #17151d; }
+  }
+  .button:hover { background: var(--violet-ink); }
+  .way p.small {
+    margin-top: 14px;
+    font: 400 0.875rem/1.5 Figtree, system-ui, sans-serif;
+    color: var(--ink-soft);
+  }
+
+  /* Performance notes */
+  .notes {
+    margin: 96px 0 0;
+    padding-top: 28px;
+    border-top: 1px solid var(--rule);
+  }
+  .notes h2 {
+    margin: 0 0 22px;
+    font-size: 1.25rem;
+    font-weight: 400;
+    font-style: italic;
+  }
+  .notes dl {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 26px 40px;
+    margin: 0;
+  }
+  .notes dt { font-weight: 700; }
+  .notes dd { margin: 2px 0 0; color: var(--ink-soft); font-size: 1rem; }
+  .notes code {
+    font: 400 0.9em/1 ui-monospace, 'SF Mono', Menlo, monospace;
+    color: var(--ink);
+  }
+
+  footer {
+    margin: 110px 0 0;
+    padding: 0 0 36px;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--ink-soft);
+  }
+  footer p { margin: 4px 0; }
+
+  @media (max-width: 760px) {
+    header.title { margin-top: 44px; }
+    .poet, .composer { grid-column: 1 / -1; text-align: center; }
+    .way { margin-top: 56px; }
+    .notes dl { grid-template-columns: 1fr; }
+    .system { overflow-x: auto; margin-left: -8px; margin-right: -8px; }
+    #staff { min-width: 640px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topline">
+    <span><img src="icon.png" alt="">Lily Studio</span>
+  </div>
+
+  <header class="title">
+    <p class="dedication">for people who write music, not code</p>
+    <h1>Lily Studio</h1>
+    <p class="subtitle">A small studio for LilyPond scores</p>
+    <span class="poet">Free</span>
+    <span class="composer">For your Mac</span>
+  </header>
+
+  <section class="system" aria-label="The first bars of Ode to Joy, with words">
+    <svg id="staff" viewBox="0 28 850 104" role="img" aria-hidden="true"></svg>
+  </section>
+
+  <section class="way">
+    <h2>On your Mac</h2>
+    <p class="tempo">Your scores, in your own folders</p>
+    <p>Write a score and see it engraved beside the text, then play it back
+      and print it. It uses LilyPond on your Mac; the app shows you how to set
+      it up.</p>
+    <a class="button" id="download" href="/dist/Lily%20Studio-0.2.0-arm64.dmg">Download for Mac</a>
+    <p class="small">Version <span id="version">0.2.0</span> for Apple Silicon and macOS 14 or later. Signed and notarized by Apple.</p>
+  </section>
+
+  <section class="notes">
+    <h2>Performance notes</h2>
+    <dl>
+      <div><dt>Engraved as you type</dt><dd>The score follows the text, a keystroke behind.</dd></div>
+      <div><dt>Mistakes in plain words</dt><dd><code>“\stacato” is not a LilyPond command</code>, and a click takes you there.</dd></div>
+      <div><dt>Click a note</dt><dd>It finds that note in the text.</dd></div>
+      <div><dt>Play it back</dt><dd>Notes light up as they sound. Mute a part, or give it another instrument.</dd></div>
+      <div><dt>Falling notes</dt><dd>Notes fall onto a keyboard, as in piano videos.</dd></div>
+      <div><dt>PDF and MIDI</dt><dd>Export the printable score, or the music with or without its muted parts.</dd></div>
+    </dl>
+  </section>
+
+  <footer>
+    <p><em>Music engraving by LilyPond, www.lilypond.org</em></p>
+  </footer>
+</div>
+
+<script>
+  // Ode to Joy's first four bars in C, with the page's words under them.
+  // Staff lines are 10 units apart; E5 sits in the top space (y = 45).
+  const Y = { C5: 55, D5: 50, E5: 45, F5: 40, G5: 35 };
+  const bars = [
+    [['E5', 1, 'Write'], ['E5', 1, 'the'], ['F5', 1, 'mu', true], ['G5', 1, 'sic,']],
+    [['G5', 1, 'see'], ['F5', 1, 'it'], ['E5', 1, 'in'], ['D5', 1, 'print,']],
+    [['C5', 1, 'hear'], ['C5', 1, 'it'], ['D5', 1, 'play'], ['E5', 1, 'back']],
+    [['E5', 1.5, 'as'], ['D5', 0.5, 'you'], ['D5', 2, 'go.']],
+  ];
+  const svg = document.getElementById('staff');
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs, parent = svg) => {
+    const node = document.createElementNS(NS, name);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    parent.appendChild(node);
+    return node;
+  };
+
+  for (let i = 0; i < 5; i++) el('line', { class: 'line', x1: 0, x2: 850, y1: 40 + i * 10, y2: 40 + i * 10 });
+  el('line', { class: 'bar', x1: 0, x2: 0, y1: 40, y2: 80 });
+  const clef = el('text', { class: 'clef', x: 6, y: 70, 'font-size': 50 });
+  clef.textContent = '\u{1D11E}';
+  for (const [y, t] of [[59, '4'], [79, '4']]) {
+    const n = el('text', { class: 'time', x: 58, y });
+    n.textContent = t;
+  }
+
+  const start = 82, width = 191;
+  const SPACE = { 0.5: 30, 1: 39, 1.5: 50, 2: 0 };
+  bars.forEach((bar, b) => {
+    const x0 = start + b * width;
+    let x = x0 + 26;
+    bar.forEach(([pitch, len, word, hyphen]) => {
+      const y = Y[pitch];
+      const g = el('g', { class: 'note' });
+      el('ellipse', { class: 'head' + (len === 2 ? ' open' : ''), cx: x, cy: y, rx: 6.3, ry: 4.4, transform: `rotate(-20 ${x} ${y})` }, g);
+      el('line', { class: 'stem', x1: x - 5.7, x2: x - 5.7, y1: y + 1.5, y2: y + 35 }, g);
+      if (len === 0.5) el('path', { class: 'flag', d: `M${x - 5.7} ${y + 35} c 1 -8 12 -10 9 -22` }, g);
+      if (len === 1.5) el('circle', { class: 'dot', cx: x + 11, cy: y, r: 2 }, g);
+      const t = el('text', { x, y: 118 }, g);
+      t.textContent = word;
+      if (hyphen) el('line', { class: 'hyphen', x1: x + SPACE[len] / 2 - 3, x2: x + SPACE[len] / 2 + 3, y1: 113, y2: 113 }, g);
+      x += SPACE[len];
+    });
+    el('line', { class: 'bar', x1: x0 + width, x2: x0 + width, y1: 40, y2: 80 });
+  });
+  el('line', { class: 'bar final', x1: start + 4 * width - 4, x2: start + 4 * width - 4, y1: 40, y2: 80 });
+
+  // The published version, so the next release needs no change here. `npm run
+  // upload` sends the DMG before latest.json; if this fails, the link above stays.
+  fetch('/dist/latest.json', { cache: 'no-store' })
+    .then((response) => response.json())
+    .then(({ version }) => {
+      document.getElementById('download').href = `/dist/Lily%20Studio-${version}-arm64.dmg`;
+      document.getElementById('version').textContent = version;
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>

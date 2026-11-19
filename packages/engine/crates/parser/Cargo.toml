@@ -1,0 +1,21 @@
+[package]
+name = "lily-engine-parser"
+description = "The engine's LilyPond parser: sources, the lexer and the grammar, with LilyPond's diagnostics (docs/research/wasm-engine/02-parser.md §5, P1–P12)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc, as the Scheme crate: what a byte of the wasm costs is in
+# this crate. P1 and P2 touch only bytes; P3 classifies \name by its value
+# in a module of lily-engine-scheme's VM, which uses its (lily); P5 gives
+# music functions the music crate's values (step 18a).
+[dependencies]
+lily-engine-music = { path = "../music" }
+lily-engine-scheme = { path = "../scheme" }
+
+# tests/support's (lily) has layout's stencils, which define-markup-commands.scm
+# makes as it loads (MS3 step 2).
+[dev-dependencies]
+lily-engine-layout = { path = "../layout" }

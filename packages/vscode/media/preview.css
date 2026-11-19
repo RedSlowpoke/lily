@@ -1,0 +1,340 @@
+/* Preview webview (DECISIONS D17). The CSP allows no inline styles, so every
+   rule lives here; preview.js only sets custom properties through the CSSOM. */
+
+html {
+  /* Always reserve the scrollbar: fit-width must not flip it on and off. */
+  overflow-y: scroll;
+}
+
+body {
+  margin: 0;
+  padding: 32px 0 0; /* #toolbar */
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font: var(--vscode-font-size, 13px) var(--vscode-font-family, sans-serif);
+}
+
+#pages {
+  box-sizing: border-box;
+  /* Grows with zoomed pages so their left edge stays reachable by scrolling. */
+  width: max-content;
+  min-width: 100%;
+  padding: 16px; /* PADDING in preview.js */
+}
+
+.page {
+  width: var(--page-width, 100%);
+  margin: 0 auto 16px;
+  /* The classic SVG backend paints with currentColor (DECISIONS D1). */
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  outline: 1px solid var(--vscode-contrastBorder, var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35)));
+}
+
+.page:last-child {
+  margin-bottom: 0;
+}
+
+/* The playhead is placed inside the page it is on (DECISIONS D26). */
+.page {
+  position: relative;
+}
+
+body[data-colors='paper'] .page {
+  color: #000;
+  background: #fff;
+  outline-color: var(--vscode-contrastBorder, rgba(0, 0, 0, 0.2));
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+.page svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* What LilyPond puts inline and the CSP discards. */
+.page tspan {
+  white-space: pre;
+}
+
+.page a {
+  color: inherit;
+  cursor: default;
+}
+
+/* Point-and-click (DECISIONS D19): preview.js gives textedit: links `source`, and
+   `current` to what the editor's cursor points at. LilyPond paints with
+   currentColor, so `color` recolours the glyph; the stroke makes a notehead
+   findable at fit-width. */
+.page {
+  --lily-link: var(--vscode-editorLink-activeForeground, #3794ff);
+}
+
+body[data-colors='paper'] .page {
+  --lily-link: #0b5fd0;
+}
+
+.page a.source {
+  cursor: pointer;
+}
+
+.page a.source:hover,
+.page a.current {
+  color: var(--lily-link);
+}
+
+.page a.current path {
+  stroke: currentColor;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Playback (DECISIONS D26): preview.js gives what sounds now `playing` and slides
+   a bar through the system at the pace of the music. */
+.page {
+  --lily-playing: var(--vscode-charts-orange, #e0912a);
+}
+
+body[data-colors='paper'] .page {
+  --lily-playing: #d9480f;
+}
+
+.page a.playing {
+  color: var(--lily-playing);
+}
+
+.page a.playing path {
+  stroke: currentColor;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+.playhead {
+  position: absolute;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--lily-playing) 40%, transparent);
+  pointer-events: none;
+}
+
+.page-error {
+  box-sizing: border-box;
+  padding: 24px;
+  color: var(--vscode-errorForeground);
+}
+
+#empty {
+  margin: 0;
+  padding: 25vh 24px 0;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+#empty:empty {
+  display: none;
+}
+
+#progress {
+  position: fixed;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+}
+
+#progress::before {
+  content: '';
+  position: absolute;
+  width: 30%;
+  height: 100%;
+  background: var(--vscode-progressBar-background, #0e70c0);
+  animation: progress 1.4s linear infinite;
+}
+
+@keyframes progress {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #progress::before {
+    left: 0;
+    width: 100%;
+    animation: none;
+  }
+}
+
+#note {
+  position: fixed;
+  z-index: 1;
+  bottom: 12px;
+  left: 12px;
+  max-width: calc(100% - 48px);
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--vscode-contrastBorder, var(--vscode-editorWidget-border, transparent));
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-editorWidget-foreground);
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+}
+
+/* Fixed, not sticky: a zoomed score scrolls sideways and the toolbar must not. */
+#toolbar {
+  position: fixed;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  height: 32px; /* TOOLBAR in preview.js, and the body's padding above */
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--vscode-contrastBorder, var(--vscode-editorWidget-border, transparent));
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-editorWidget-foreground);
+  white-space: nowrap;
+  user-select: none;
+}
+
+#toolbar .group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#toolbar .spacer {
+  flex: 1 1 8px;
+  min-width: 8px;
+}
+
+#toolbar button {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Glyphs that are small at the text size. */
+#refresh,
+#page-previous,
+#page-next {
+  font-size: 1.5em;
+  line-height: 1;
+}
+
+#zoom-fit {
+  min-width: 46px;
+}
+
+#page-label {
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Playback (DECISIONS D24). */
+#midi-play,
+#midi-stop {
+  font-size: 0.85em;
+}
+
+#midi-seek {
+  width: 96px;
+  height: 4px;
+  margin: 0 6px;
+  accent-color: var(--vscode-progressBar-background, #0e70c0);
+  cursor: pointer;
+}
+
+#midi-seek:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#midi-time,
+#midi-bar {
+  font-variant-numeric: tabular-nums;
+}
+
+#midi-time:not(:empty),
+#midi-bar:not(:empty) {
+  margin: 0 4px;
+}
+
+#midi-bar {
+  color: var(--vscode-descriptionForeground);
+}
+
+/* What is dispensable goes first: the slider, then the time. */
+@media (max-width: 680px) {
+  #midi-seek {
+    display: none;
+  }
+}
+
+@media (max-width: 540px) {
+  #midi-time,
+  #midi-bar {
+    display: none;
+  }
+}
+
+/* A pane squeezed beside the code: keep the export buttons in sight. */
+@media (max-width: 400px) {
+  #toolbar {
+    padding: 0 2px;
+  }
+
+  #toolbar .spacer {
+    flex-basis: 2px;
+    min-width: 2px;
+  }
+
+  #toolbar button {
+    padding: 0 4px;
+  }
+
+  #page-label,
+  #zoom-fit {
+    min-width: 34px;
+  }
+}
+
+#toolbar button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+#toolbar button:active:not(:disabled) {
+  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+#toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#toolbar button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+[hidden] {
+  display: none !important;
+}

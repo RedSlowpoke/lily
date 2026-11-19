@@ -1,0 +1,29 @@
+# Our LilyPond engine in WebAssembly (DECISIONS D56), and its own Cargo
+# workspace, so the pinned nightly of rust-toolchain.toml touches nothing
+# else (D57). GPL-3.0-or-later, like the LilyPond it ports; the apps stay MIT
+# and reach it only through the worker in packages/studio/src/web/engine/.
+[workspace]
+resolver = "3"
+members = ["crates/chord-names", "crates/core", "crates/figured-bass", "crates/fonts", "crates/layout", "crates/music", "crates/parser", "crates/pdf", "crates/scheme", "crates/skyline", "crates/smf", "crates/spike", "crates/svg", "crates/tablature"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["Oleg Arshinskii <velet592@gmail.com>"]
+rust-version = "1.90"
+
+# The wasm build (docs/research/wasm-engine/08-integration.md §1.3), with the
+# pinned nightly's -Cpanic=immediate-abort and -Zbuild-std.
+[profile.wasm]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# For wasm-split (§2.3): the same with the name section kept.
+[profile.wasm-names]
+inherits = "wasm"
+strip = false

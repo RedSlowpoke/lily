@@ -1,0 +1,22 @@
+[package]
+name = "lily-engine-svg"
+description = "The engine's SVG writer: LilyPond's stencils written as output-svg.scm and framework-svg.scm write them, in 06 §6.2's file and preview forms (docs/research/wasm-engine/06-output.md §6, W3, W4; D104, D253)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc, as the crates below it: layout's stencils and font
+# metrics, and crates/fonts' packs, whose outlines are the glyphs' `d`
+# (06 §5.1). libm for partial-ellipse's sin, cos and sqrt, as layout's.
+[dependencies]
+lily-engine-fonts = { path = "../fonts" }
+lily-engine-layout = { path = "../layout" }
+lily-engine-scheme = { path = "../scheme" }
+libm = { version = "0.2.16", default-features = false }
+
+# The music crate's values come before layout's in a VM's (lily), for the
+# example and the tests that read the references.
+[dev-dependencies]
+lily-engine-music = { path = "../music" }

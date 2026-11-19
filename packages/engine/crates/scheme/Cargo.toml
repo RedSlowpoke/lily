@@ -1,0 +1,19 @@
+[package]
+name = "lily-engine-scheme"
+description = "The engine's Scheme: the Guile subset that LilyPond's Scheme and scores use, with a precise collector whose roots Rust declares (docs/research/wasm-engine/03-scheme.md §5, S1–S4)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc: what a byte of the wasm costs is in this crate. libm, as
+# the skyline uses it, for the flonums' sqrt, exp, log and trigonometry, which
+# core does not have on stable.
+[dependencies]
+libm = { version = "0.2.16", default-features = false }
+
+# tests/library.rs loads LilyPond's library files, which make moments and
+# durations as they load.
+[dev-dependencies]
+lily-engine-music = { path = "../music" }

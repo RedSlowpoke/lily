@@ -1,0 +1,10 @@
+[package]
+name = "lily-engine-fonts"
+description = "The engine's fonts: Emmentaler's packs of tools/packs/build.mjs read with LilyPond's metrics, and the text metric packs of tools/packs/text.mjs (docs/research/wasm-engine/06-output.md §5.1, §5.3)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc and no dependencies, like the rest of the core.

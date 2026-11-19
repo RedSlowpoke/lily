@@ -1,0 +1,13 @@
+[package]
+name = "lily-engine-smf"
+description = "The engine's Standard MIDI Files: LilyPond's Midi_walker as a writer, and a reader of chunks and events (docs/research/wasm-engine/07-midi.md §4.2)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc and no dependencies, for the MIDI module of chapter 08.
+# `classic` swaps libc++'s Floyd pop (LLVM 16 and later) for the older sift-down.
+[features]
+classic = []

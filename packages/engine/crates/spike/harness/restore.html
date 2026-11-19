@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>First restore</title>
+<style>
+  body { margin: 0; padding: 12px 16px; background: #fff; color: #111; font: 15px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 17px; margin: 0 0 10px; }
+  h2 { font-size: 15px; margin: 14px 0 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  button { font: inherit; padding: 8px 14px; }
+  .table { overflow-x: auto; margin-bottom: 10px; }
+  table { border-collapse: collapse; font: 13px/1.4 ui-monospace, monospace; }
+  th, td { padding: 2px 8px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { border-bottom: 1px solid #999; font-weight: 600; }
+  .bad { color: #b00020; }
+  #log { display: block; white-space: pre-wrap; font: 12px/1.35 ui-monospace, monospace; background: #f3f3f3; padding: 6px 8px; min-height: 4em; }
+</style>
+</head>
+<body>
+<h1>First restore in a fresh worker (MS2 step 31)</h1>
+<div class="row">
+<button id="again" type="button" disabled>Run again</button>
+<span id="status">Loading…</span>
+</div>
+<h2>Each fresh worker, ms</h2>
+<div class="table">
+<table>
+<thead><tr><th>mode</th><th>compile</th><th>instantiate</th><th>copy</th><th>first</th><th>second</th><th>warm</th><th>pregrown</th><th>grow</th><th>verdict</th></tr></thead>
+<tbody id="workers"></tbody>
+</table>
+</div>
+<h2>The parts, first against warm (medians), ms</h2>
+<div class="table">
+<table>
+<thead id="partsHead"></thead>
+<tbody id="parts"></tbody>
+</table>
+</div>
+<output id="log"></output>
+<script src="restore-page.js"></script>
+</body>
+</html>

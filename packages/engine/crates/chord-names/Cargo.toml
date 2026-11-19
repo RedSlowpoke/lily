@@ -1,0 +1,16 @@
+[package]
+name = "lily-engine-chord-names"
+description = "The engine's chord names: the ChordName's line breaking (chord-name.cc; Chord_name_engraver is the image's Scheme), 08 §2.4's chord-names module (D223)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc. Layout and music only (D223), with the VM's values that
+# both are written in; the core links it and installs its primitive after
+# layout's.
+[dependencies]
+lily-engine-layout = { path = "../layout" }
+lily-engine-music = { path = "../music" }
+lily-engine-scheme = { path = "../scheme" }

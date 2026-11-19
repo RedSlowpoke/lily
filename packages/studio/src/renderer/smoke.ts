@@ -1,0 +1,787 @@
+// `npm run test:smoke` in packages/studio/ (DECISIONS D42): `lily-studio --smoke-test`
+// opens the real window on a scratch folder and loads this script into it,
+// which drives the page once — layout, Scores | Stems (D112) and its Separate
+// view, Monaco, the file
+// list, highlighting, an edit, the unsaved marker, a save, the compile it
+// starts, its pages in the preview and a click on a note there, the PDF tab and
+// Export PDF, an error marked, an edit by another program reloaded and
+// compiled, its MIDI played with the notes marked, and unsaved edits in the
+// preview with live preview on — then hands a JSON report to the Rust side,
+// which prints it and exits 0 or 1. It starts on the welcome screen, sees
+// LilyPond looked for, and reads the error explained (D37). Opening a score
+// engraves it without a save, and the preview follows the editor from score to
+// score (D39). The sidebar's edge drags wider, and a stand-in for Claude Code
+// answers a chat, writes a score that the file list then shows, and continues
+// its session on the second message (D40). A selection's context menu explains
+// it with the agent, the lines attached (D41), and an image pasted into the
+// message box goes with the next message (D46). The Parts fold mutes the part,
+// puts it on another instrument and starts playback at a bar marked on the
+// pages (D45); Export MIDI writes smoke.mid (D54); Piano shows the music
+// falling onto a keyboard over the editor (D116), as karaoke (D133) that Export Video
+// writes as an MP4 (D140), and below the score, without
+// a track hidden in Tracks (D117). From the recording shows beside the tempo
+// once the score has a recording, writes what the Rust side's stand-in for
+// lily-transcribe found as one edit, and one ⌘Z takes it back (D159). Given a song, it separates
+// it, plays the stems and a mix of two, and writes a score for the bass (D112).
+//
+// The Rust side prepares the folder and the stand-in agent, and answers the
+// smoke_* commands: files on disk as another program sees them, the menu, and
+// a drop from the Finder.
+// Typing goes through the editor's input element, as the keyboard's would.
+import { invoke } from '@tauri-apps/api/core'
+import { parseMidi } from '@lily/common/web/midi.js'
+import type { Command } from '../ipc'
+
+/** The panes of the layout, by `data-pane`, in their order from the left. */
+const PANES = ['files', 'editor', 'preview'] as const
+
+interface SmokeFolder {
+  folder: string
+  score: string
+  /** A copy of LILY_SMOKE_SONG's song to separate, in a folder of its own (D112). */
+  song: string | null
+}
+
+const $ = <T extends Element = HTMLElement>(selector: string): T | null => document.querySelector<T>(selector)
+const $$ = <T extends Element = HTMLElement>(selector: string): T[] => [...document.querySelectorAll<T>(selector)]
+const text = (selector: string): string => ($(selector)?.textContent ?? '').replace(/ /g, ' ')
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** On disk, as another program sees it. */
+const disk = {
+  read: (file: string): Promise<string | null> => invoke('smoke_read', { file }),
+  /** A file's bytes: a MIDI file, which its text would mangle. */
+  bytes: (file: string): Promise<number[] | null> => invoke('smoke_read_bytes', { file }),
+  write: (file: string, text: string): Promise<void> => invoke('smoke_write', { file, text }),
+  list: (dir: string): Promise<string[]> => invoke('smoke_list', { dir }),
+}
+/** As the application menu sends it. */
+const menu = (command: Command): Promise<void> => invoke('smoke_menu', { command })
+
+/**
+ * A tenth of a second of near silence, 8-bit mono at 8 kHz: a WAV whose every
+ * byte is below 0x80, so smoke_write writes the text as these bytes (D159).
+ */
+function silentWav(): string {
+  const le = (value: number, bytes: number) => String.fromCharCode(...Array.from({ length: bytes }, (_, i) => (value >> (8 * i)) & 0xff))
+  const data = 800
+  return `RIFF${le(36 + data, 4)}WAVEfmt ${le(16, 4)}${le(1, 2)}${le(1, 2)}${le(8000, 4)}${le(8000, 4)}${le(1, 2)}${le(8, 2)}data${le(data, 4)}${'\x7f'.repeat(data)}`
+}
+
+/** Monaco's input: an EditContext element, or a textarea without it (WebKit). */
+function editorInput(): HTMLElement {
+  const input = $('.monaco-editor .native-edit-context, .monaco-editor textarea')
+  if (!input) throw new Error('no editor input')
+  input.focus()
+  return input
+}
+
+/** Types `value` at the editor's cursor, as a keyboard or an input method would. */
+function type(value: string): void {
+  editorInput()
+  document.execCommand('insertText', false, value)
+}
+
+/** A key with ⌘, sent where the keyboard's would go. */
+function command(key: string, keyCode: number): void {
+  const target = editorInput()
+  for (const kind of ['keydown', 'keyup']) {
+    const event = new KeyboardEvent(kind, { key, code: `Key${key.toUpperCase()}`, metaKey: true, bubbles: true, cancelable: true })
+    // Monaco reads keyCode, which the constructor cannot set.
+    Object.defineProperty(event, 'keyCode', { get: () => keyCode })
+    target.dispatchEvent(event)
+  }
+}
+
+const editorLines = () => text('.monaco-editor .view-lines')
+const editorDirty = () => $('[data-pane="editor"]')?.dataset.dirty
+const statusMessage = () => text('.status-message')
+const compileTone = () => $('.status-compile:not([hidden])')?.dataset.tone
+const click = (selector: string) => $(selector)?.click()
+/** The distinct notes of the preview that link to a line of `file`, or to it at all. */
+const linksTo = (pattern: RegExp) =>
+  new Set($$<SVGAElement>('.preview-page a.source').map((a) => a.href.baseVal).filter((href) => pattern.test(href))).size
+
+async function main(): Promise<void> {
+  const smoke = await invoke<SmokeFolder>('smoke_folder')
+  const problems: string[] = []
+  /** Polls `probe` until it returns something truthy. */
+  type Probed<T> = T | null | undefined | false | '' | 0
+  const until = async <T>(what: string, probe: () => Probed<T> | Promise<Probed<T>>, ms = 10_000): Promise<T | undefined> => {
+    const started = Date.now()
+    while (Date.now() - started < ms) {
+      try {
+        const value = await probe()
+        if (value) {
+          void invoke('smoke_log', { level: 'info', message: `${what}: ${Date.now() - started} ms` })
+          return value
+        }
+      } catch {
+        // Not there yet.
+      }
+      await sleep(100)
+    }
+    problems.push(`timed out waiting for ${what}`)
+    void invoke('smoke_log', { level: 'warn', message: `timed out waiting for ${what}` })
+    return undefined
+  }
+
+  const layout = {
+    title: document.title,
+    panes: PANES.map((name) => {
+      const rect = $(`[data-pane="${name}"]`)?.getBoundingClientRect()
+      return rect ? { name, left: rect.left, width: rect.width, height: rect.height } : null
+    }),
+    studio: typeof window.studio === 'object' && window.studio !== null,
+  }
+  if (!layout.title.endsWith('Lily Studio')) problems.push(`title is ${JSON.stringify(layout.title)}`)
+  if (!layout.studio) problems.push('the bridge window.studio is missing')
+  let right = -1
+  layout.panes.forEach((pane, index) => {
+    if (!pane) {
+      problems.push(`pane ${PANES[index]} is missing`)
+      return
+    }
+    if (pane.width < 100 || pane.height < 100) problems.push(`pane ${pane.name} is ${pane.width}×${pane.height}`)
+    if (pane.left <= right) problems.push(`pane ${pane.name} is not right of the one before`)
+    right = pane.left
+  })
+
+  // Scores | Stems (D112): Stems covers the files, the editor and the
+  // preview, which stay laid out behind it; Scores brings them back.
+  const away = (name: string) => $(`[data-pane="${name}"]`)?.hasAttribute('data-away')
+  const covers = ['files', 'editor', 'preview'] as const
+  click('.workspace-switch [data-workspace="stems"]')
+  const stems = $('[data-pane="stems"]')?.getBoundingClientRect()
+  const [, editorPane, previewPane] = layout.panes
+  // The Separate view is drawn, and waits for a song.
+  const run = $<HTMLButtonElement>('.separate-run')
+  const view = { drop: !!$('.separate-drop'), qualities: $$('.separate-segments button').length, run: run?.textContent, runDisabled: run?.disabled }
+  const workspaces = {
+    stems: { away: covers.filter(away), shown: !away('stems') && !away('separations'), left: stems?.left, right: stems?.right, view },
+    scores: { away: [] as string[] },
+  }
+  if (!view.drop || view.qualities !== 3 || !view.runDisabled) problems.push(`the Separate view is not ready for a song: ${JSON.stringify(view)}`)
+  if (workspaces.stems.away.length !== covers.length || !workspaces.stems.shown) problems.push(`Stems left ${covers.filter((name) => !away(name)).join(', ') || 'its panes'} showing`)
+  if (stems && editorPane && previewPane && (Math.abs(stems.left - editorPane.left) > 1 || Math.abs(stems.right - previewPane.left - previewPane.width) > 1)) {
+    problems.push(`the Separate view spans ${stems.left}–${stems.right}, not the editor and the preview`)
+  }
+  click('.workspace-switch [data-workspace="scores"]')
+  workspaces.scores.away = [...covers, 'stems', 'separations'].filter(away)
+  if (workspaces.scores.away.join() !== 'stems,separations') problems.push(`Scores leaves away ${workspaces.scores.away.join(', ')}`)
+
+  // The welcome screen covers the editor until a score opens (D37), and says
+  // whether LilyPond was found. A setup opened for a missing LilyPond is closed,
+  // so the rest can run and report the compile as skipped.
+  const welcome = await until('the welcome screen to look for LilyPond', () => {
+    const screen = $('[data-welcome]')
+    const lilypond = screen?.querySelector<HTMLElement>('.welcome-lilypond')
+    if (!screen || screen.hidden || !lilypond || lilypond.dataset.state === 'checking') return null
+    $<HTMLDialogElement>('dialog.setup[open]')?.close()
+    return { sample: !!screen.querySelector('[data-action="sample"]'), lilypond: lilypond.textContent, state: lilypond.dataset.state }
+  })
+  if (welcome && !welcome.sample) problems.push('the welcome screen has no sample button')
+
+  // The file list shows the two LilyPond files and not notes.txt.
+  const listed = await until('the file list', () => {
+    const files = $$('[data-file]').map((e) => e.dataset.relative)
+    return files.length ? files : null
+  })
+  if (listed && JSON.stringify(listed) !== JSON.stringify(['second.ly', 'smoke.ly', 'parts/melody.ily'])) {
+    problems.push(`the file list is ${JSON.stringify(listed)}`)
+  }
+
+  // Opening a file shows it in Monaco.
+  click('[data-relative="smoke.ly"]')
+  const shown = await until('Monaco to show smoke.ly', () => (editorLines().includes('c4 d e f') ? editorLines() : ''))
+
+  // Opening it engraved it, before any save (D39).
+  const openedPages = await until('the preview of the score just opened', () => $$('.preview-page svg').length, 30_000)
+
+  // The grammar colours it (Monaco joins neighbouring pieces of one colour into a span).
+  const colours = await until('LilyPond highlighting', () => {
+    const spans = $$('.monaco-editor .view-lines span span')
+    const colour = (text: string) => {
+      const span = spans.find((s) => s.textContent?.trim() === text)
+      return span && getComputedStyle(span).color
+    }
+    const found = { brace: colour('{'), string: colour('"2.24.0"'), duration: colour('4') }
+    return Object.values(found).every(Boolean) && new Set(Object.values(found)).size === 3 ? found : null
+  })
+
+  // Typing marks the file unsaved, in the list and the editor header.
+  type('% smoke ')
+  await until('the unsaved marker', () => !!$('[data-relative="smoke.ly"][data-dirty]') && editorDirty() === 'true')
+
+  // Save (as the menu does) writes the file and clears the marker.
+  await menu('save')
+  await until('the marker to clear', () => !$('.file-list [data-dirty]') && editorDirty() === 'false')
+  const saved = await disk.read(smoke.score)
+  if (!saved?.includes('% smoke ')) problems.push(`the saved file is ${JSON.stringify(saved)}`)
+
+  // The save compiled the score (D31); the status line says how it went.
+  const firstTone = await until('the compile status', () => {
+    const tone = compileTone()
+    return tone && tone !== 'busy' ? tone : ''
+  }, 30_000)
+  const compile: Record<string, unknown> = { firstTone }
+  if (firstTone === 'error' && text('.status-compile').includes('not installed')) {
+    compile.skipped = 'lilypond is not installed'
+  } else {
+    // The preview shows the pages; a click on the note d puts the cursor on its line (D32).
+    compile.pages = await until('the preview pages', () => $$('.preview-page svg').length)
+    const link = $$<SVGAElement>('.preview-page a.source').find((a) => /smoke\.ly:2:5:/.test(a.href.baseVal))
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    if (!link) problems.push('no link to the note d in the preview')
+    compile.revealed = await until('the cursor on the line of the clicked note', () => {
+      if (!document.activeElement?.closest('.monaco-editor')) return ''
+      const current = $('.monaco-editor .view-overlays .current-line')
+      const line = current && $$('.monaco-editor .view-line').find((l) => l.style.top === current.parentElement?.style.top)
+      const lineText = (line?.textContent ?? '').replace(/ /g, ' ')
+      return lineText.includes('c4 d e f') ? lineText : ''
+    })
+
+    // The PDF tab draws the PDF with pdf.js; nothing is written next to the
+    // score until Export PDF, which writes smoke.pdf there (D33).
+    click('.preview-tabs [data-view="pdf"]')
+    compile.pdfPages = await until('the PDF pages', () => {
+      const canvas = $<HTMLCanvasElement>('[data-view="pdf"] canvas.pdf-page')
+      return canvas && canvas.width > 0 && !$('[data-view="svg"].preview-view')?.offsetParent ? $$('canvas.pdf-page').length : 0
+    }, 30_000)
+    const before = await disk.list(smoke.folder)
+    if (before.some((name) => name.endsWith('.pdf'))) problems.push(`a PDF was written before Export PDF: ${before.join(', ')}`)
+    $$('[data-pane="preview"] button').find((b) => b.textContent === 'Export PDF')?.click()
+    compile.exported = await until('Export PDF to report', () => (statusMessage().startsWith('Exported') ? statusMessage() : ''), 30_000)
+    const pdf = await disk.read(`${smoke.folder}/smoke.pdf`)
+    if (!pdf?.startsWith('%PDF-')) problems.push('Export PDF did not write smoke.pdf next to the score')
+    click('.preview-tabs [data-view="svg"]')
+
+    // A misspelt command is marked in the editor and turns the status red.
+    // On a line of its own: the cursor is still in the `% smoke` comment.
+    type('\n\\stacato ')
+    await menu('save')
+    compile.errorTone = await until('an error status', () => (compileTone() === 'error' ? 'error' : ''), 30_000)
+    compile.squiggle = await until('an error marker in the editor', () => !!$('.monaco-editor .squiggly-error'))
+    compile.status = text('.status-compile')
+    // The banner above the score says it in plain words (D37).
+    compile.banner = await until('the problem explained above the score', () => {
+      const banner = $('.problem-banner')
+      return banner && !banner.hidden && banner.textContent?.includes('is not a LilyPond command') ? banner.textContent : ''
+    })
+  }
+
+  // Another program edits the saved score: the editor reloads it and the
+  // score compiles again (D34). The last save left the editor clean. The new
+  // version has a \midi block, which the player plays below.
+  const firstCompile = text('.status-compile')
+  await disk.write(smoke.score, '\\version "2.24.0"\n\\score { { c4 d e g a b a g } \\layout { } \\midi { } }\n')
+  const external: Record<string, unknown> = {}
+  external.reloaded = await until('the editor to reload the file changed on disk', () =>
+    editorLines().includes('c4 d e g') && editorDirty() === 'false' ? statusMessage() : '',
+  )
+  if (!compile.skipped) {
+    external.compile = await until('the score to compile after the change on disk', () => {
+      const status = text('.status-compile')
+      return compileTone() === 'ok' && status !== firstCompile ? status : ''
+    }, 30_000)
+
+    // Play shows the length; paused a second in, a note is marked and the
+    // playhead stands on its page (D35). Stop clears both.
+    const playback: Record<string, unknown> = {}
+    playback.length = await until('the MIDI to load', () => {
+      const play = $<HTMLButtonElement>('.transport-play')
+      return play && !play.disabled ? text('.transport-time') : ''
+    })
+    click('.transport-play')
+    playback.playing = await until('the music to play past one second', () => {
+      const time = text('.transport-time')
+      return $('.transport')?.dataset.state === 'playing' && !time.startsWith('0:00') ? time : ''
+    })
+    click('.transport-play')
+    playback.paused = await until('the notes marked while paused', () => {
+      const notes = $$('.preview-page a.playing').length
+      const head = $('.preview-page > .playhead')
+      return notes > 0 && head && head.offsetHeight > 0 ? { notes, bar: text('.transport-bar') } : null
+    })
+    // Piano (D116): the music falls onto a keyboard where the source was,
+    // and Source brings the editor back.
+    click('.transport-piano')
+    playback.piano = await until('the piano view over the editor', () => {
+      const canvas = $<HTMLCanvasElement>('.piano-canvas')
+      const shown = $('.editor')?.dataset.mode === 'piano' && !$('.monaco-host')?.offsetParent
+      return shown && canvas && canvas.width > 0 && $('.piano-empty')?.hidden && $('.transport-piano')?.getAttribute('aria-pressed') === 'true'
+        ? `${canvas.clientWidth}×${canvas.clientHeight}`
+        : ''
+    })
+    // Karaoke (D133): the notes run past a line, the keys' choice gone; back to the keyboard.
+    const style = $<HTMLSelectElement>('.piano-style')!
+    style.value = 'karaoke'
+    style.dispatchEvent(new Event('change'))
+    playback.karaoke = await until('the karaoke style', () => {
+      const canvas = $<HTMLCanvasElement>('.piano-canvas')
+      return $<HTMLSelectElement>('.piano-range')?.hidden && canvas && canvas.width > 0 && $('.piano-empty')?.hidden ? canvas.getAttribute('aria-label') : ''
+    })
+    // The arrow keys (D154), with Karaoke shown and the music paused: ← twice is the start,
+    // → is 5 s on; ↓ says the volume over the karaoke, and ↑ puts it back.
+    const press = (key: string) => document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    press('ArrowLeft')
+    press('ArrowLeft')
+    await until('← to the start', () => text('.transport-time').startsWith('0:00 '))
+    press('ArrowRight')
+    playback.arrowSeek = await until('→ 5 s on', () => (text('.transport-time').startsWith('0:05 ') ? text('.transport-time') : ''))
+    press('ArrowDown')
+    playback.arrowVolume = await until('↓ said over the karaoke', () => ($('.karaoke-flash.shown') ? text('.karaoke-flash') : ''))
+    press('ArrowUp')
+    await until('↑ back to the whole volume', () => text('.karaoke-flash') === 'Volume 100 %')
+    // Full window (D135, D143): a double-click on the karaoke puts it over everything, its
+    // controls in a corner; the corner's icon brings it back, and so does Esc.
+    const fullWindow = () => {
+      const host = $('.piano-canvas')?.parentElement
+      return host?.classList.contains('karaoke-full') && host.offsetWidth === window.innerWidth && !!$('.karaoke-full .karaoke-play')?.offsetParent ? `${host.offsetWidth}×${host.offsetHeight}` : ''
+    }
+    if (!$('.karaoke-full-toggle')?.offsetParent || $('.karaoke-play')?.offsetParent) problems.push('Karaoke’s pane shows ▶ or lacks the full-window icon')
+    $('.piano-canvas')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    playback.karaokeFull = await until('karaoke over the whole window by a double-click', fullWindow)
+    click('.karaoke-full-toggle')
+    await until('karaoke back in its pane by the icon', () => !$('.karaoke-full'))
+    click('.karaoke-full-toggle')
+    await until('karaoke over the whole window by the icon', fullWindow)
+    $('.karaoke-full')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await until('karaoke back in its pane by Esc', () => !$('.karaoke-full'))
+    // Export Video (D140): the karaoke as an MP4 beside the score, the panel's suggestion taken.
+    // Its sound (D155): the menu's boxes, ticked as heard, then Export.
+    click('.karaoke-export-button')
+    playback.videoSounds = await until('Export Video\'s sound', () => {
+      const boxes = $$<HTMLInputElement>('.karaoke-sounds:not([hidden]) input')
+      return boxes.length > 0 ? boxes.map((box) => `${box.value}:${box.checked}`).join(' ') : ''
+    })
+    click('.karaoke-sound-export')
+    playback.exportedVideo = await until(
+      'Export Video to report',
+      () => (/^(Exported smoke \(karaoke\)\.mp4|The video could not be exported)/.test(statusMessage()) ? statusMessage() : ''),
+      120_000,
+    )
+    const ffmpegMissing = statusMessage().includes('ffmpeg is not installed')
+    const written = await disk.list(smoke.folder)
+    if (!ffmpegMissing && !written.includes('smoke (karaoke).mp4')) problems.push(`Export Video did not write smoke (karaoke).mp4: ${statusMessage()}`)
+    // The last step writes a hidden part file and renames it into place.
+    if (written.some((name) => name.endsWith('.part.mp4'))) problems.push(`Export Video left its part file: ${written.join(', ')}`)
+    // Both, and Karaoke's notes on a staff (D156): the keys' choice back, the lane's choice and
+    // the words' least size (D157) still there.
+    const lane = $<HTMLSelectElement>('.piano-lane')!
+    lane.value = 'staff'
+    lane.dispatchEvent(new Event('change'))
+    style.value = 'both'
+    style.dispatchEvent(new Event('change'))
+    playback.karaokeBoth = await until('karaoke on a staff over the keyboard', () => {
+      const label = $<HTMLCanvasElement>('.piano-canvas')?.getAttribute('aria-label') ?? ''
+      const least = $<HTMLElement>('.karaoke-min-text')
+      return !$<HTMLSelectElement>('.piano-range')?.hidden && !lane.hidden && least && !least.hidden && /staff/.test(label) && /keyboard/.test(label) ? label : ''
+    })
+    lane.value = 'roll'
+    lane.dispatchEvent(new Event('change'))
+    style.value = 'keys'
+    style.dispatchEvent(new Event('change'))
+    await until('the keyboard again', () => !$<HTMLSelectElement>('.piano-range')?.hidden && lane.hidden && !!$<HTMLElement>('.karaoke-min-text')?.hidden)
+    // Below the score (D117): the source is back and the piano under the
+    // pages; Tracks hides the one part's notes and shows them again.
+    const place = $<HTMLSelectElement>('.piano-place')!
+    place.value = 'score'
+    place.dispatchEvent(new Event('change'))
+    playback.pianoBelow = await until('the piano view below the score', () => {
+      const canvas = $<HTMLCanvasElement>('.piano-dock .piano-canvas')
+      const shown = !$('.piano-dock')?.hidden && $('.editor')?.dataset.mode === 'source' && !!$('.monaco-host')?.offsetParent
+      return shown && canvas && canvas.width > 0 && $('.piano-empty')?.hidden ? `${canvas.clientWidth}×${canvas.clientHeight}` : ''
+    })
+    click('.piano-tracks-button')
+    const track = await until('the tracks to choose from', () => $<HTMLInputElement>('.piano-tracks:not([hidden]) input'))
+    track?.click()
+    playback.pianoTracks = await until('the hidden track\'s notes to go', () => ($('.piano-empty')?.hidden === false ? text('.piano-empty') : ''))
+    track?.click()
+    await until('the track\'s notes again', () => $('.piano-empty')?.hidden === true)
+    place.value = 'source'
+    place.dispatchEvent(new Event('change'))
+    await until('the piano view over the editor again', () => $('.editor')?.dataset.mode === 'piano' && !!$('.piano-dock')?.hidden)
+    click('.editor-tabs [data-view="source"]')
+    await until('the source again', () => $('.editor')?.dataset.mode === 'source' && !!$('.monaco-host')?.offsetParent)
+    click('.transport button[aria-label="Stop"]')
+    playback.stopped = await until('the marks to clear on stop', () => !$('.preview-page a.playing, .playhead') && $('.transport')?.dataset.state === 'stopped')
+
+    // The Parts fold (D45): the one part muted and put on a flute; a
+    // right-click on the last note starts playback at its bar, 2, which ▶
+    // then starts from. The setup is kept by the Rust side.
+    click('.transport-parts')
+    playback.parts = await until('the Parts fold with its part', () => {
+      const selects = $$<HTMLSelectElement>('.playback-setup:not([hidden]) .part select')
+      return selects.length === 1 ? selects[0].options[0].textContent : ''
+    })
+    // The audio track and the tempo (D155): Add audio…, and the tempo field
+    // showing the score's own as its placeholder.
+    playback.tempo = await until('the fold\'s Add audio… and tempo', () => ($('.playback-setup .part-add-audio') ? $<HTMLInputElement>('.playback-setup .part-bpm')?.placeholder : ''))
+    // From the recording (D159) needs a recording to listen to.
+    if ($('.playback-setup .part-from-recording')) problems.push('From the recording was shown for a score without % Audio:')
+    click('.playback-setup .part-mute')
+    const flute = $<HTMLSelectElement>('.playback-setup .part select')!
+    flute.value = '73'
+    flute.dispatchEvent(new Event('change'))
+    const notes = $$<SVGAElement>('.preview-page a.source')
+    const last = notes[notes.length - 1].getBoundingClientRect()
+    notes[notes.length - 1].dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: last.left + last.width / 2, clientY: last.top + last.height / 2, button: 2 }),
+    )
+    playback.menu = await until('the pages\' menu', () => ($('.preview-menu:not([hidden])') ? $$('.preview-menu button').map((b) => b.textContent) : null))
+    $$<HTMLButtonElement>('.preview-menu button')[1].click()
+    playback.mark = await until('the start mark on the pages', () => {
+      const mark = $('.preview-page > .start-mark')
+      return mark && mark.offsetHeight > 0 && !$('.transport-mark')?.hidden ? text('.transport-mark') : ''
+    })
+    click('.transport-play')
+    playback.fromMark = await until('the music to start at bar 2', () => ($('.transport')?.dataset.state === 'playing' && text('.transport-bar') === 'bar 2' ? text('.transport-time') : ''))
+    click('.transport button[aria-label="Stop"]')
+    playback.kept = await until('the setup to be kept', async () => {
+      const setup = await invoke<{ parts?: Record<string, unknown>; startBar?: number } | null>('playback_setup', { rootFile: smoke.score })
+      return setup?.startBar === 2 && JSON.stringify(Object.values(setup.parts ?? {})) === '[{"muted":true,"program":73}]' ? setup : null
+    })
+    // File › Export MIDI (D54). The only part is muted, so there is nothing
+    // to offer to leave out: smoke.mid is the whole music, its control track
+    // and the part. The smoke test takes the panel's suggestion.
+    await menu('export-midi')
+    playback.exportedMidi = await until('Export MIDI to report', () => (statusMessage().startsWith('Exported smoke.mid') ? statusMessage() : ''), 30_000)
+    const midi = await disk.read(`${smoke.folder}/smoke.mid`)
+    if (!midi?.startsWith('MThd') || midi.split('MTrk').length !== 3) problems.push('Export MIDI did not write smoke.mid with its two tracks')
+    // File › Export for GarageBand (D162): the folder smoke (GarageBand)
+    // beside the score, the smoke test taking the panel's folder, with
+    // smoke.mid rewritten and the read-me; the score names no recording. The
+    // part keeps its track, now named, and plays the fold's flute, where
+    // lilypond's file has the piano; the control track loses its name.
+    await menu('export-garageband')
+    playback.exportedGarageBand = await until('Export for GarageBand to report', () => (statusMessage() === 'Exported smoke (GarageBand).' ? statusMessage() : ''), 30_000)
+    const garageBand = `${smoke.folder}/smoke (GarageBand)`
+    playback.garageBandFolder = (await disk.list(garageBand)).sort()
+    if (JSON.stringify(playback.garageBandFolder) !== '["Read me.txt","smoke.mid"]') problems.push(`Export for GarageBand wrote ${JSON.stringify(playback.garageBandFolder)}`)
+    if (!(await disk.read(`${garageBand}/Read me.txt`))?.includes('Open "smoke.mid" in GarageBand')) problems.push('Export for GarageBand\'s Read me.txt does not say to open smoke.mid')
+    const rewritten = await disk.bytes(`${garageBand}/smoke.mid`)
+    const tracks = rewritten ? parseMidi(new Uint8Array(rewritten)).tracks : []
+    playback.garageBandTracks = tracks.map(({ name, programs, notes }) => ({ name, programs, notes }))
+    if (tracks.length !== 2 || tracks[0].name !== '' || !tracks[1].name || tracks[1].programs.join() !== '73' || tracks[1].notes !== 8) {
+      problems.push(`Export for GarageBand did not write smoke.mid with its named flute part: ${JSON.stringify(playback.garageBandTracks)}`)
+    }
+    click('.playback-setup .part-reset')
+    click('.transport-parts')
+    playback.reset = await until('the setup to be cleared', async () =>
+      $('.playback-setup')?.hidden && (await invoke('playback_setup', { rootFile: smoke.score })) === null && !$('.start-mark') ? 'cleared' : '',
+    )
+    // From the recording (D159): with a recording beside the score, named in
+    // its % Audio: line, the button is beside the tempo. The Rust side's
+    // stand-in for lily-transcribe answers Song A's tempo and bar 1:
+    // % BPM: is changed and % Audio offset: added, as one edit in the editor,
+    // and one ⌘Z gives back the text exactly as it was.
+    await disk.write(`${smoke.folder}/smoke.wav`, silentWav())
+    await disk.write(smoke.score, '\\version "2.24.0"\n% Audio: smoke.wav\n% BPM: 120\n\\score { { c4 d e g a b a g } \\layout { } \\midi { } }\n')
+    await until('the score with a recording reloaded', () => editorLines().includes('% Audio: smoke.wav') && editorDirty() === 'false')
+    click('.transport-parts')
+    playback.fromRecording = await until('From the recording beside the tempo', () => text('.playback-setup:not([hidden]) .part.tempo .part-from-recording'))
+    const beforeTempo = editorLines()
+    click('.playback-setup .part-from-recording')
+    playback.detected = await until('the tempo found written to the score', () =>
+      editorLines().includes('% BPM: 113.76') && editorLines().includes('% Audio offset: -0.32') && !editorLines().includes('% BPM: 120') && statusMessage().includes('♩ = 113.76')
+        ? statusMessage()
+        : '',
+    )
+    command('z', 90)
+    playback.detectionUndone = await until('one undo to give the text back as it was', () => (editorLines() === beforeTempo && editorDirty() === 'false' ? 'as it was' : ''))
+    if (await disk.read(smoke.score).then((onDisk) => onDisk?.includes('113.76'))) problems.push('From the recording wrote the file, not the editor')
+    // Export for GarageBand again (D162 stage 2): the folder is replaced, the
+    // smoke test answering no alert, and now holds the recording % Audio:
+    // names, aligned to the MIDI's tick 0: no pickup and no offset, so its
+    // 800 frames as they were.
+    await menu('export-garageband')
+    playback.exportedWithAudio = await until('Export for GarageBand with the recording to report', () => (statusMessage() === 'Exported smoke (GarageBand) with smoke.wav.' ? statusMessage() : ''), 30_000)
+    playback.garageBandFolderWithAudio = (await disk.list(garageBand)).sort()
+    const aligned = await disk.bytes(`${garageBand}/smoke.wav`)
+    if (JSON.stringify(playback.garageBandFolderWithAudio) !== '["Read me.txt","smoke.mid","smoke.wav"]' || aligned?.length !== 844 || String.fromCharCode(...aligned.slice(0, 4)) !== 'RIFF') {
+      problems.push(`Export for GarageBand did not put smoke.wav in the folder: ${JSON.stringify(playback.garageBandFolderWithAudio)}, ${aligned?.length} bytes`)
+    }
+    click('.transport-parts')
+    external.playback = playback
+  }
+  // With unsaved edits it asks first; the smoke test's answer keeps them.
+  type('% mine ')
+  await until('the unsaved marker before the second change', () => editorDirty() === 'true')
+  await disk.write(smoke.score, '\\version "2.24.0"\n{ c4 d e a }\n')
+  external.kept = await until('the unsaved edits to be kept', () => {
+    const status = statusMessage()
+    return status.includes('changes are kept') && editorLines().includes('% mine') && editorDirty() === 'true' ? status : ''
+  })
+  compile.external = external
+
+  // Live preview (D36): the unsaved text engraves without a save; switched
+  // off, the preview shows the file on disk again. The disk has `{ c4 d e a }`.
+  if (!compile.skipped) {
+    const live: Record<string, unknown> = {}
+    const notes = () => linksTo(/smoke\.ly:2:/)
+    live.button = text('.status-live')
+    command('a', 65)
+    type('\\version "2.24.0"\n{ c4 d e f g a b c }\n')
+    live.unsaved = await until('the unsaved notes in the preview', () => (notes() === 8 && editorDirty() === 'true' ? 8 : 0), 30_000)
+    const onDisk = await disk.read(smoke.score)
+    if (onDisk !== '\\version "2.24.0"\n{ c4 d e a }\n') problems.push(`live preview wrote the file: ${JSON.stringify(onDisk)}`)
+    click('.status-live')
+    live.off = await until('the saved notes after switching live preview off', () => (notes() === 4 ? 4 : 0), 30_000)
+    // Back on, as the switch is remembered.
+    click('.status-live')
+    live.on = await until('the unsaved notes after switching it on again', () => (notes() === 8 ? 8 : 0), 30_000)
+    // Add MIDI (D44): the score has none, so the transport offers it; a
+    // click wraps the music in a \score with \midi, and the live compile
+    // gives the player something to play.
+    live.addMidi = await until('Add MIDI in the transport', () => {
+      const add = $<HTMLButtonElement>('.transport-add')
+      return add && !add.hidden && $<HTMLButtonElement>('.transport-play')?.disabled ? add.textContent : ''
+    })
+    click('.transport-add')
+    live.midiAdded = await until('the MIDI of the added \\midi block', () => {
+      const play = $<HTMLButtonElement>('.transport-play')
+      const added = editorLines().includes('\\midi { }') && $('.transport-add')?.hidden
+      return added && play && !play.disabled && linksTo(/smoke\.ly:3:/) === 8 ? text('.transport-time') : ''
+    }, 30_000)
+    compile.live = live
+  }
+
+  // The preview follows the editor (D39): another score's pages, a note for
+  // an include of no score, and back to smoke.ly as it was, unsaved text and all.
+  const switching: Record<string, unknown> = {}
+  if (!compile.skipped) {
+    const smokeLinks = () => linksTo(/\/smoke\.ly:/)
+    const secondLinks = () => linksTo(/\/second\.ly:/)
+    const before = smokeLinks()
+    click('[data-relative="second.ly"]')
+    switching.second = await until('the preview of second.ly', () => (secondLinks() > 0 && smokeLinks() === 0 ? secondLinks() : 0), 30_000)
+    click('[data-relative="parts/melody.ily"]')
+    switching.include = await until('the note for an include of no score', () => {
+      const note = text('[data-view="svg"] .pane-body')
+      return !$('.preview-page') && note.includes('not part of a score') ? note : ''
+    })
+    click('[data-relative="smoke.ly"]')
+    switching.back = await until('the preview of smoke.ly again', () => (smokeLinks() === before && secondLinks() === 0 ? before : 0), 30_000)
+  }
+
+  // The sidebar (D40): its edge dragged 80 px to the right makes it 80 px wider.
+  const sidebar: Record<string, unknown> = {}
+  const width = () => $('[data-pane="sidebar"]')!.getBoundingClientRect().width
+  const handle = $('.splitter-columns')!
+  // The width is remembered: each run's drag would widen it until it reached
+  // its limit. A double-click puts it back first.
+  handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+  const edge = handle.getBoundingClientRect()
+  const pointer = (kind: string, x: number) =>
+    handle.dispatchEvent(new PointerEvent(kind, { bubbles: true, clientX: x, clientY: edge.top + 50, button: 0, pointerId: 1 }))
+  const widths = { before: width(), after: 0 }
+  pointer('pointerdown', edge.left + 3)
+  pointer('pointermove', edge.left + 83)
+  pointer('pointerup', edge.left + 83)
+  widths.after = width()
+  sidebar.width = widths
+  if (Math.round(widths.after - widths.before) !== 80) problems.push(`dragging the sidebar's edge by 80 px changed its width from ${widths.before} to ${widths.after}`)
+
+  // Agent setup finds the stand-in; Agent chats sends it a message. Its answer
+  // and what it did appear, agent.ly joins the file list, and a second message
+  // continues the same session.
+  click('[data-fold="setup"] .fold-header button')
+  sidebar.setup = await until('Agent setup to find the stand-in agent', () => {
+    const card = $('.agent-card[data-agent="claude"]')
+    return card && card.dataset.state === 'ready' && card.textContent?.includes('9.9.9') ? text('.agent-card[data-agent="claude"] .agent-card-state') : ''
+  }, 20_000)
+  click('[data-fold="chats"] .fold-header button')
+  const send = (message: string) => {
+    $<HTMLTextAreaElement>('.chat-composer textarea')!.value = message
+    click('.chat-composer button[type="submit"]')
+  }
+  const answer = (resumed: string) => () => {
+    const log = $('.chat-log')
+    const said = [...(log?.querySelectorAll('.chat-entry.agent') ?? [])].map((e) => e.textContent).join('|')
+    return said.includes(`(resumed: ${resumed})`) && !log?.querySelector('.chat-working:not([hidden])') ? said : ''
+  }
+  await until('the agent to be ready in the chat', () => $<HTMLSelectElement>('.chat-toolbar select')?.value === 'claude' && !$<HTMLTextAreaElement>('.chat-composer textarea')?.disabled)
+  send('Write a new score')
+  sidebar.answer = await until('the agent to answer', answer('no'), 20_000)
+  sidebar.tool = $$('.chat-entry.tool').map((e) => e.textContent).join('|')
+  if (sidebar.tool !== 'Wrote agent.ly') problems.push(`the chat shows the agent did ${JSON.stringify(sidebar.tool)}`)
+  sidebar.listed = await until('agent.ly in the file list', () => !!$('[data-relative="agent.ly"]'))
+  send('And again')
+  sidebar.resumed = await until('the second answer in the same session', answer('yes'), 20_000)
+
+  // A selection in the editor: the message box says it goes along, and the
+  // context menu's Explain sends it to the agent in the open chat (D41).
+  command('a', 65)
+  sidebar.attached = await until('the selection named above the message box', () => {
+    const context = text('.chat-context')
+    return /^With lines 1–\d+ of smoke\.ly$/.test(context) ? context : ''
+  })
+  /** Elements matching `selector` in the page and in every shadow root. */
+  const deep = (root: ParentNode, selector: string): Element[] => [
+    ...root.querySelectorAll(selector),
+    ...[...root.querySelectorAll('*')].flatMap((e) => (e.shadowRoot ? deep(e.shadowRoot, selector) : [])),
+  ]
+  const lines = $('.monaco-editor .view-lines')!
+  const box = lines.getBoundingClientRect()
+  lines.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 20, clientY: box.top + 8, button: 2 }))
+  sidebar.menu = await until('the agent items in the context menu', () => {
+    const labels = deep(document, '.action-label').map((e) => e.textContent?.trim() ?? '').filter((t) => t.includes('Agent') || t.includes('Selection'))
+    return labels.length === 3 ? labels : null
+  })
+  // Monaco's menu takes a mouse-up only a moment after it opens, against stray clicks.
+  await sleep(500)
+  deep(document, '.action-label')
+    .find((e) => e.textContent?.trim() === 'Explain Selection with Agent')
+    ?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+  sidebar.explained = await until('the selection explained in the open chat', () => {
+    const users = $$('.chat-log .chat-entry.user').map((e) => e.textContent ?? '')
+    const answers = $$('.chat-log .chat-entry.agent').map((e) => e.textContent ?? '')
+    return users.length === 3 && users[2].startsWith('Explain what the selected lines do') && answers.length === 3 && answers[2].includes('with a selection') ? answers[2] : ''
+  }, 20_000)
+
+  // An image pasted into the message box shows above it, goes with the next
+  // message, and the stand-in is given its directory to read (D46).
+  const canvas = Object.assign(document.createElement('canvas'), { width: 40, height: 30 })
+  const paint = canvas.getContext('2d')!
+  paint.fillStyle = '#2f6fb0'
+  paint.fillRect(0, 0, 40, 30)
+  const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('no PNG'))), 'image/png'))
+  const clipboard = new DataTransfer()
+  clipboard.items.add(new File([png], 'pasted.png', { type: 'image/png' }))
+  $('.chat-composer textarea')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true }))
+  sidebar.pasted = await until('the pasted image above the message box', () => $$('.chat-composer .chat-image img').length === 1 && !$('.chat-composer .chat-images')?.hidden)
+  send('What is in this image?')
+  sidebar.image = await until('the image sent and shown in the chat', () => {
+    const users = $$('.chat-log .chat-entry.user')
+    const shown = users[3]?.querySelector<HTMLImageElement>('.chat-images img')
+    const answers = $$('.chat-log .chat-entry.agent').map((e) => e.textContent ?? '')
+    const cleared = $$('.chat-composer .chat-image').length === 0
+    return shown?.src.startsWith('data:image/png;base64,') && cleared && answers[3]?.includes('with an image') ? answers[3] : ''
+  }, 20_000)
+  if (!sidebar.image) {
+    problems.push(`after the image: users ${JSON.stringify($$('.chat-log .chat-entry.user').map((e) => e.innerHTML.slice(0, 200)))}, answers ${JSON.stringify($$('.chat-log .chat-entry').map((e) => e.textContent))}, status ${statusMessage()}`)
+  }
+
+  // The stand-in asks to run magick (D52): the question shows with the whole
+  // command, Allow sends the answer, and the agent goes on with it.
+  send('Convert the PDF to an image')
+  sidebar.asked = await until('the question of the agent', () => {
+    const card = $('.chat-log .chat-ask')
+    return card?.querySelector('.chat-ask-text')?.textContent === 'magick -density 300 score.pdf score.png' && text('.chat-working').includes('waiting') ? card.textContent : ''
+  }, 20_000)
+  $$<HTMLButtonElement>('.chat-ask button').find((b) => b.textContent === 'Allow')?.click()
+  sidebar.allowed = await until('the agent to go on once allowed', () => {
+    const answers = $$('.chat-log .chat-entry.agent').map((e) => e.textContent ?? '')
+    const tools = $$('.chat-log .chat-entry.tool').map((e) => e.textContent ?? '')
+    const done = !$('.chat-ask') && !$('.chat-log .chat-working:not([hidden])')
+    return done && answers[4]?.startsWith('The command was allowed') && tools.includes('Allowed: Ran magick -density 300 score.pdf score.png') ? answers[4] : ''
+  }, 20_000)
+
+  // A song, when the run is given one (LILY_SMOKE_SONG, D112): dropped on the
+  // window as from the Finder, it shows Stems. BS-RoFormer SW at Fast splits
+  // it into six stems, each of which plays from the asset protocol; the bass
+  // and the drums export as a mix that plays too, and New score for bass
+  // transcribes the bass (D113) and opens bass.ly in Scores, with the bass in
+  // the Stem strip: its notes, the song's tempo, key and meter, and as many
+  // bars as the stem lasts.
+  let separation: Record<string, unknown> | undefined
+  if (smoke.song) {
+    const song = smoke.song
+    const name = song.slice(song.lastIndexOf('/') + 1)
+    await invoke('smoke_drop', { paths: [song] })
+    await until('the dropped song in Stems', () => !away('stems') && text('.separate-drop strong') === name)
+    // uv starts Python for the models' list.
+    const model = await until('the models', () => $<HTMLInputElement>('input[name="separate-model"][value="bs-roformer-sw"]'), 120_000)
+    model?.click()
+    $$<HTMLButtonElement>('.separate-segments button').find((choice) => choice.textContent === 'Fast')?.click()
+    const runLabel = text('.separate-run')
+    if (runLabel !== 'Separate instruments') problems.push(`the run button says ${JSON.stringify(runLabel)}`)
+    const started = Date.now()
+    click('.separate-run')
+    // The first separation with a model downloads it.
+    const outcome = await until('the stems of the song', () => {
+      const error = $('.separate-error:not([hidden])')?.textContent
+      if (error) return { error }
+      const stems = $$('.separate-stem').map((row) => row.dataset.stem ?? '')
+      return stems.length > 0 && { stems }
+    }, 15 * 60_000)
+    const seconds = Math.round((Date.now() - started) / 1000)
+    if (outcome?.error) problems.push(`the song was not separated: ${outcome.error}`)
+    const stems = outcome?.stems ?? []
+    if (outcome?.stems && stems.join() !== 'vocals,drums,bass,guitar,piano,other') problems.push(`the stems are ${stems.join(', ')}`)
+    const folder = $('.separate-results-head strong')?.title ?? ''
+    const written = folder ? await disk.list(folder) : []
+
+    // Each loads from the asset protocol, which the CSP's media-src lets in, as long as the song.
+    const loaded = (selector: string) => {
+      const players = $$<HTMLAudioElement>(selector)
+      const failed = players.find((player) => player.error)
+      if (failed) return { error: `${failed.title}: media error ${failed.error?.code}` }
+      const durations = players.map((player) => player.duration)
+      return players.length > 0 && durations.every((duration) => Number.isFinite(duration) && duration > 0) && { durations }
+    }
+    const players = stems.length ? await until('the stems to load', () => loaded('.separate-stems:not(.separate-mix) audio'), 30_000) : undefined
+    const durations = players?.durations ?? []
+    if (players?.error) problems.push(`a stem does not play: ${players.error}`)
+    if (durations.some((duration) => Math.abs(duration - durations[0]!) > 1)) problems.push(`the stems last ${durations.join(', ')} s`)
+
+    // Bass and drums, mixed: the smoke test takes the save panel's suggestion, in the stems' folder.
+    for (const stem of ['bass', 'drums']) $<HTMLInputElement>(`.separate-stem[data-stem="${stem}"] input[type=checkbox]`)?.click()
+    const exportLabel = text('.separate-results-foot button')
+    $<HTMLButtonElement>('.separate-results-foot button')?.click()
+    const mixed = stems.length ? await until('the mix to play', () => loaded('.separate-mix:not([hidden]) audio'), 60_000) : undefined
+    if (exportLabel !== 'Export mix of 2…') problems.push(`the export button says ${JSON.stringify(exportLabel)}`)
+    if (mixed?.error) problems.push(`the mix does not play: ${mixed.error}`)
+
+    // New score for bass: transcribed, bass.ly beside the stems, open in Scores, and the bass above the transport.
+    $<HTMLButtonElement>('.separate-stem[data-stem="bass"] .separate-score')?.click()
+    $$<HTMLButtonElement>('.separate-menu [role="menuitem"]').find((item) => item.textContent === 'New score for bass')?.click()
+    const transcribing = Date.now()
+    // The first transcription installs lily-transcribe's Python and downloads Beat This.
+    const score = stems.length
+      ? await until('the transcribed bass score with its stem', () => {
+          const error = $('.separate-error:not([hidden])')?.textContent
+          if (error) return { error }
+          const strip = $('.stem-strip:not([hidden])')
+          const stem = strip?.querySelector('.stem-strip-name')?.textContent
+          const time = strip?.querySelector('.stem-strip-time')?.textContent ?? ''
+          return away('stems') && editorLines().includes('% Stem:') && stem && /\/ \d+:\d\d$/.test(time) && !time.endsWith('/ 0:00') && { stem, time }
+        }, 10 * 60_000)
+      : undefined
+    const transcribed = Math.round((Date.now() - transcribing) / 1000)
+    if (score && 'error' in score) problems.push(`the bass was not transcribed: ${score.error}`)
+    const scoreFile = folder ? await disk.read(`${folder}/bass.ly`) : null
+    if (score && !scoreFile?.includes('% Stem:')) problems.push(`New score for bass wrote ${JSON.stringify(scoreFile)}`)
+    const bass = scoreFile ? transcribedScore(scoreFile) : undefined
+    const stemSeconds = durations[stems.indexOf('bass')] ?? 0
+    if (scoreFile && bass) {
+      if (!bass.tempo || bass.tempo < 50 || bass.tempo > 220) problems.push(`bass.ly's tempo is ${bass.tempo}`)
+      if (bass.notes < 40) problems.push(`bass.ly has ${bass.notes} notes`)
+      // As many bars as the stem lasts, the last one partly.
+      const lasts = (bass.bars * bass.beatsPerBar * 60) / (bass.tempo || 1)
+      if (stemSeconds && (lasts < stemSeconds - 1 || lasts > stemSeconds + (bass.beatsPerBar * 60) / (bass.tempo || 1) + 1)) {
+        problems.push(`bass.ly's ${bass.bars} bars last ${Math.round(lasts)} s, the stem ${Math.round(stemSeconds)} s`)
+      }
+    } else if (scoreFile) problems.push('bass.ly was not transcribed: it has no "Transcribed from the stem" line')
+    separation = { song: name, run: runLabel, seconds, stems, written, durations, mix: { label: exportLabel, duration: mixed?.durations?.[0] }, score, transcribed, bass }
+  }
+
+  const ok = problems.length === 0
+  const report = { ok, problems, ...layout, workspaces, welcome, listed, openedPages, switching, monaco: !!shown, colours, saved, compile, sidebar, separation }
+  await invoke('smoke_done', { ok, report: JSON.stringify(report, null, 2) })
+}
+
+/** What a transcribed score's comment and music say (D113): its tempo, meter, bars, key and how many notes it has. */
+function transcribedScore(text: string): { tempo: number; beatsPerBar: number; bars: number; key: string; notes: number } | undefined {
+  const line = /^% Transcribed from the stem by Lily Studio: ♩ = (\d+), (\d+)\/4, (.+), (\d+) bars\.$/m.exec(text)
+  if (!line) return undefined
+  const music = text.slice(text.indexOf('\\relative'))
+  const notes = music.match(/(?<![\\a-z])[a-g](?:is|es|s)*[,']*(?:16|8|4|2|1)\.*~?(?![a-z])/g)?.length ?? 0
+  return { tempo: Number(line[1]), beatsPerBar: Number(line[2]), key: line[3]!, bars: Number(line[4]), notes }
+}
+
+main().catch((error: unknown) => {
+  const report = JSON.stringify({ ok: false, problems: [`the smoke test threw: ${error instanceof Error ? error.stack ?? error.message : String(error)}`] }, null, 2)
+  void invoke('smoke_done', { ok: false, report })
+})

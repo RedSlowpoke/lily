@@ -1,0 +1,26 @@
+[package]
+name = "lily-engine-pdf"
+description = "The engine's PDF writer (W7): a display list of pages written as PDF, music glyphs as form XObjects, text as CID fonts subset from the URW OTFs by its own CFF subsetter (docs/research/wasm-engine/06-output.md §7; D270)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc. The writer needs only miniz_oxide's deflate (06 §7.2's
+# `pdfmin` probe); `stencils` adds the walk of a page's stencil into the
+# display list, in the core, beside the SVG writer that walks it the same
+# way; `module` the C ABI of pdf.wasm, 06 §7.3's module fetched on the first
+# export, which scripts/build.mjs builds as a cdylib (`cargo rustc
+# --crate-type cdylib`) so that the rlib stays no_std.
+[features]
+stencils = ["dep:lily-engine-fonts", "dep:lily-engine-layout", "dep:lily-engine-scheme", "dep:lily-engine-svg"]
+module = []
+
+[dependencies]
+libm = { version = "0.2.16", default-features = false }
+miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-alloc"] }
+lily-engine-fonts = { path = "../fonts", optional = true }
+lily-engine-layout = { path = "../layout", optional = true }
+lily-engine-scheme = { path = "../scheme", optional = true }
+lily-engine-svg = { path = "../svg", optional = true }

@@ -1,0 +1,16 @@
+;;; b5-lists.scm, prints 2186398299
+;; list work: build, merge sort, map, filter, fold, reverse, append
+(define (lcg-list n seed)
+  (let loop ((i 0) (x seed) (acc '()))
+    (if (= i n) acc (let ((y (remainder (+ (* x 1103) 12345) 65536))) (loop (+ i 1) y (cons y acc))))))
+(define (split l) (if (or (null? l) (null? (cdr l))) (values l '())
+  (call-with-values (lambda () (split (cddr l))) (lambda (a b) (values (cons (car l) a) (cons (cadr l) b))))))
+(define (merge a b) (cond ((null? a) b) ((null? b) a) ((< (car a) (car b)) (cons (car a) (merge (cdr a) b))) (else (cons (car b) (merge a (cdr b))))))
+(define (msort l) (if (or (null? l) (null? (cdr l))) l (call-with-values (lambda () (split l)) (lambda (a b) (merge (msort a) (msort b))))))
+(define (filter p l) (cond ((null? l) '()) ((p (car l)) (cons (car l) (filter p (cdr l)))) (else (filter p (cdr l)))))
+(define (fold f acc l) (if (null? l) acc (fold f (f (car l) acc) (cdr l))))
+(define (round1 seed)
+  (let* ((l (lcg-list 5000 seed)) (s (msort l)) (m (map (lambda (x) (* 2 x)) s))
+         (f (filter (lambda (x) (= 0 (remainder x 3))) m)) (r (append (reverse f) f)))
+    (+ (fold + 0 r) (length r) (car s))))
+(display (let loop ((i 0) (acc 0)) (if (= i 10) acc (loop (+ i 1) (+ acc (round1 i)))))) (newline)

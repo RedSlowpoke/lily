@@ -1,0 +1,44 @@
+Lily's engine: what this directory serves, and under which licences.
+
+The engine (core.wasm, core-debug.wasm, the split .wasm modules, pdf.wasm,
+core.image and the .part files) is free software under the GNU General Public License,
+version 3 or later (LICENSE.txt). It ports GNU LilyPond 2.26.0's C++ and
+carries LilyPond's Scheme and ly/ files in its image. Its source is the
+repository and commit that manifest.json names under "source".
+
+The music font packs (emmentaler-*.pack) are LilyPond's Emmentaler and
+braces, as LilyPond 2.26.0 ships them in fonts/otf, in another encoding:
+under the GPL with the font exception, or the SIL Open Font License, as
+LilyPond's own LICENSE says (LILYPOND-LICENSE.txt, LILYPOND-LICENSE.OFL.txt).
+
+The text packs (C059-*, NimbusSans-*, NimbusMonoPS-*, each a .pack and a
+.outlines.pack) are URW's base 35 fonts, as LilyPond 2.26.0 ships them in
+fonts/otf, in another encoding: under the GNU Affero General Public License,
+version 3 (URW-COPYING.txt), with URW's exception for PostScript and PDF
+documents (URW-LICENSE.txt). Their source is
+https://github.com/ArtifexSoftware/urw-base35-fonts and LilyPond 2.26.0's
+fonts/otf; the tool that encodes them is packages/engine/tools/packs/text.mjs
+of the engine's source.
+
+The TeX Gyre Schola packs (TeXGyreSchola-*, each a .pack and a .outlines.pack),
+which stand for "New Century Schoolbook" as LilyPond's fontconfig gives it, are
+TeX Gyre Schola 2.005, as LilyPond 2.26.0 ships it in fonts/otf, in another
+encoding: "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and
+J.M. Nowacki (on behalf of TeX users groups)", under the GUST Font License
+(TEX-GYRE-LICENSE.txt), an instance of the LaTeX Project Public License,
+version 1.3c (LPPL-1.3c.txt). Their source is
+https://ctan.org/pkg/tex-gyre and LilyPond 2.26.0's fonts/otf.
+
+The OTFs beside them (C059-*.otf, NimbusSans-*.otf, NimbusMonoPS-*.otf,
+TeXGyreSchola-*.otf) are those fonts as LilyPond 2.26.0 ships them,
+unmodified, under the same licences, each renamed to its PostScript name:
+the page draws a page's text in them, and the PDF module embeds subsets of
+them.
+
+The SVG pages the engine writes draw Emmentaler's glyphs as paths, which
+its font exception covers, and name the text fonts without embedding them.
+The PDFs its PDF module (pdf.wasm) writes draw Emmentaler's glyphs as
+outlines, which its font exception covers, and embed subsets of the URW
+fonts, their programs unmodified but for the glyphs left out, which URW's
+exception for PostScript and PDF documents covers, and of TeX Gyre Schola,
+which the GUST Font License allows.

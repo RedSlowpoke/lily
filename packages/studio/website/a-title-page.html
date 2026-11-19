@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lily Studio</title>
+<meta name="description" content="A small studio for LilyPond scores, on your Mac or in your browser.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Old+Standard+TT:ital,wght@0,400;0,700;1,400&family=Figtree:wght@400;600&family=Noto+Music&display=swap" rel="stylesheet">
+<!--
+  Option A: the title page of a score. The page is laid out as LilyPond lays
+  out a score's first page: dedication, title, subtitle, poet and composer,
+  then the first system, whose notes can be played.
+-->
+<style>
+  :root {
+    --paper: #ffffff;
+    --ink: #1d1a26;
+    --ink-soft: #5d586b;
+    --staff: #9a95a6;
+    --violet: #6a4ca6;
+    --violet-ink: #4e3482;
+    --petal: #f1ecfa;
+    --rule: #e4e0ec;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #17151d;
+      --ink: #ece8f4;
+      --ink-soft: #a8a2b6;
+      --staff: #6f6a7c;
+      --violet: #b69ce8;
+      --violet-ink: #cdb9f2;
+      --petal: #241f31;
+      --rule: #2e2a38;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 1.125rem/1.6 'Old Standard TT', 'Century Schoolbook', Georgia, serif;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 2px; }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 28px 24px 0;
+  }
+
+  .topline {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font: 400 0.875rem/1 Figtree, system-ui, sans-serif;
+    color: var(--ink-soft);
+  }
+  .topline img { width: 28px; height: 28px; vertical-align: middle; margin-right: 8px; }
+  .topline a { text-decoration: none; }
+  .topline a:hover { color: var(--ink); text-decoration: underline; }
+
+  /* The score's header block */
+  header.title {
+    margin-top: 72px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    row-gap: 6px;
+  }
+  .dedication {
+    grid-column: 1 / -1;
+    text-align: center;
+    font-style: italic;
+    font-size: 1rem;
+    color: var(--ink-soft);
+  }
+  h1 {
+    grid-column: 1 / -1;
+    text-align: center;
+    margin: 18px 0 0;
+    font-weight: 700;
+    font-size: clamp(3rem, 9vw, 6.25rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    grid-column: 1 / -1;
+    text-align: center;
+    margin: 14px 0 34px;
+    font-size: clamp(1.25rem, 2.6vw, 1.6rem);
+  }
+  .poet, .composer { font-size: 1rem; }
+  .composer { text-align: right; }
+
+  /* The first system */
+  .system {
+    position: relative;
+    margin-top: 40px;
+  }
+  #staff { display: block; width: 100%; height: auto; overflow: visible; }
+  .system .line { stroke: var(--staff); stroke-width: 1; }
+  .system .bar { stroke: var(--ink); stroke-width: 1.2; }
+  .system .bar.final { stroke-width: 4; }
+  .system .clef { font-family: 'Noto Music', serif; fill: var(--ink); }
+  .system .time { font: 700 25px/1 'Old Standard TT', serif; fill: var(--ink); }
+  .note .head { fill: var(--ink); }
+  .note .head.open { fill: none; stroke: var(--ink); stroke-width: 1.8; }
+  .note .stem, .note .flag { stroke: var(--ink); stroke-width: 1.3; fill: none; }
+  .note .dot { fill: var(--ink); }
+  .note text {
+    font: 400 15px/1 'Old Standard TT', serif;
+    fill: var(--ink);
+    text-anchor: middle;
+  }
+  .note .hyphen { stroke: var(--ink); stroke-width: 1; }
+  .note.on .head:not(.open), .note.on .dot { fill: var(--violet); }
+  .note.on .head.open, .note.on .stem, .note.on .flag { stroke: var(--violet); }
+  .note.on text { fill: var(--violet); }
+
+  .play {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 0;
+    padding: 6px 12px 6px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    background: none;
+    color: var(--ink-soft);
+    font: 600 0.8125rem/1 Figtree, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .play:hover { color: var(--ink); border-color: var(--staff); }
+  .play svg { width: 10px; height: 10px; fill: currentColor; }
+
+  /* Two ways in, set as two movements */
+  .ways {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    margin: 88px 0 0;
+  }
+  .way h2 {
+    margin: 0 0 4px;
+    font-size: 1.75rem;
+    font-weight: 700;
+  }
+  .way .tempo {
+    margin: 0 0 18px;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+  .way p { margin: 0 0 14px; max-width: 34em; }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 18px;
+    margin-top: 22px;
+    font-family: Figtree, system-ui, sans-serif;
+  }
+  .button {
+    display: inline-block;
+    padding: 13px 22px;
+    border-radius: 6px;
+    background: var(--violet);
+    color: #fff;
+    font: 600 1rem/1.2 Figtree, system-ui, sans-serif;
+    text-decoration: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .button { color: #17151d; }
+  }
+  .button:hover { background: var(--violet-ink); }
+  .button.quiet {
+    background: none;
+    color: var(--violet-ink);
+    box-shadow: inset 0 0 0 1.5px var(--violet);
+  }
+  .button.quiet:hover { background: var(--petal); }
+  .small {
+    font: 400 0.875rem/1.5 Figtree, system-ui, sans-serif;
+    color: var(--ink-soft);
+  }
+  .small a { color: var(--violet-ink); }
+
+  /* Performance notes */
+  .notes {
+    margin: 96px 0 0;
+    padding-top: 28px;
+    border-top: 1px solid var(--rule);
+  }
+  .notes h2 {
+    margin: 0 0 22px;
+    font-size: 1.25rem;
+    font-weight: 400;
+    font-style: italic;
+  }
+  .notes dl {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 26px 40px;
+    margin: 0;
+  }
+  .notes dt { font-weight: 700; }
+  .notes dd { margin: 2px 0 0; color: var(--ink-soft); font-size: 1rem; }
+  .notes code {
+    font: 400 0.9em/1 ui-monospace, 'SF Mono', Menlo, monospace;
+    color: var(--ink);
+  }
+
+  footer {
+    margin: 110px 0 0;
+    padding: 0 0 36px;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--ink-soft);
+  }
+  footer p { margin: 4px 0; }
+
+  @media (max-width: 760px) {
+    header.title { margin-top: 44px; }
+    .poet, .composer { grid-column: 1 / -1; text-align: center; }
+    .ways { grid-template-columns: 1fr; gap: 48px; margin-top: 56px; }
+    .notes dl { grid-template-columns: 1fr; }
+    .system { overflow-x: auto; margin-left: -8px; margin-right: -8px; }
+    #staff { min-width: 640px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topline">
+    <span><img src="icon.png" alt="">Lily Studio</span>
+    <a href="https://github.com/velet5/lily">Source on GitHub</a>
+  </div>
+
+  <header class="title">
+    <p class="dedication">for people who write music, not code</p>
+    <h1>Lily Studio</h1>
+    <p class="subtitle">A small studio for LilyPond scores</p>
+    <span class="poet">Free and open source</span>
+    <span class="composer">On your Mac, or in your browser</span>
+  </header>
+
+  <section class="system" aria-label="The first bars of Ode to Joy, with words">
+    <svg id="staff" viewBox="0 28 850 104" role="img" aria-hidden="true"></svg>
+    <button class="play" id="play" type="button">
+      <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 0 L10 5 L1 10 Z"/></svg>
+      <span>Play these bars</span>
+    </button>
+  </section>
+
+  <section class="ways">
+    <div class="way">
+      <h2>In your browser</h2>
+      <p class="tempo">Nothing to install</p>
+      <p>Sign in and start writing. Your scores are kept in My Scores, engraved
+        as you type, and you can upload and download them from the menu bar.</p>
+      <div class="actions">
+        <a class="button" href="/studio/">Open Lily Studio</a>
+      </div>
+    </div>
+    <div class="way">
+      <h2>On your Mac</h2>
+      <p class="tempo">The whole studio, with Stems</p>
+      <p>Everything the web has, plus Stems: split a song into vocals, drums,
+        bass and the rest, and start a score from any of them. It uses
+        LilyPond on your Mac; the app shows you how to set it up.</p>
+      <div class="actions">
+        <a class="button" href="https://github.com/velet5/lily/releases/latest">Download for Mac</a>
+        <a class="small" href="https://github.com/velet5/lily/releases/latest">Intel Mac</a>
+      </div>
+      <p class="small" style="margin-top:12px">Version 0.1.0. Signed and notarized by Apple. Stems needs Apple Silicon.</p>
+    </div>
+  </section>
+
+  <section class="notes">
+    <h2>Performance notes</h2>
+    <dl>
+      <div><dt>Engraved as you type</dt><dd>The score follows the text, a keystroke behind.</dd></div>
+      <div><dt>Mistakes in plain words</dt><dd><code>“\stacato” is not a LilyPond command</code>, and a click takes you there.</dd></div>
+      <div><dt>Click a note</dt><dd>It finds that note in the text.</dd></div>
+      <div><dt>Play it back</dt><dd>Notes light up as they sound. Mute a part, or give it another instrument.</dd></div>
+      <div><dt>Piano view</dt><dd>Notes fall onto a keyboard, as in piano videos.</dd></div>
+      <div><dt>PDF and MIDI</dt><dd>Export the printable score, or the music with or without its muted parts.</dd></div>
+    </dl>
+  </section>
+
+  <footer>
+    <p><em>Music engraving by LilyPond, www.lilypond.org</em></p>
+    <p>Lily Studio is MIT licensed. <a href="https://github.com/velet5/lily">Source on GitHub</a>.</p>
+  </footer>
+</div>
+
+<script>
+  // Ode to Joy's first four bars in C, with the page's words under them.
+  // Staff lines are 10 units apart; E5 sits in the top space (y = 45).
+  const Y = { C5: 55, D5: 50, E5: 45, F5: 40, G5: 35 };
+  const HZ = { C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99 };
+  const bars = [
+    [['E5', 1, 'Write'], ['E5', 1, 'the'], ['F5', 1, 'mu', true], ['G5', 1, 'sic,']],
+    [['G5', 1, 'see'], ['F5', 1, 'it'], ['E5', 1, 'in'], ['D5', 1, 'print,']],
+    [['C5', 1, 'hear'], ['C5', 1, 'it'], ['D5', 1, 'play'], ['E5', 1, 'back']],
+    [['E5', 1.5, 'as'], ['D5', 0.5, 'you'], ['D5', 2, 'go.']],
+  ];
+  const svg = document.getElementById('staff');
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs, parent = svg) => {
+    const node = document.createElementNS(NS, name);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    parent.appendChild(node);
+    return node;
+  };
+
+  for (let i = 0; i < 5; i++) el('line', { class: 'line', x1: 0, x2: 850, y1: 40 + i * 10, y2: 40 + i * 10 });
+  el('line', { class: 'bar', x1: 0, x2: 0, y1: 40, y2: 80 });
+  const clef = el('text', { class: 'clef', x: 6, y: 70, 'font-size': 50 });
+  clef.textContent = '\u{1D11E}';
+  for (const [y, t] of [[59, '4'], [79, '4']]) {
+    const n = el('text', { class: 'time', x: 58, y });
+    n.textContent = t;
+  }
+
+  const notes = [];
+  const start = 82, width = 191;
+  const SPACE = { 0.5: 30, 1: 39, 1.5: 50, 2: 0 };
+  bars.forEach((bar, b) => {
+    const x0 = start + b * width;
+    let x = x0 + 26;
+    bar.forEach(([pitch, len, word, hyphen]) => {
+      const y = Y[pitch];
+      const g = el('g', { class: 'note' });
+      el('ellipse', { class: 'head' + (len === 2 ? ' open' : ''), cx: x, cy: y, rx: 6.3, ry: 4.4, transform: `rotate(-20 ${x} ${y})` }, g);
+      el('line', { class: 'stem', x1: x - 5.7, x2: x - 5.7, y1: y + 1.5, y2: y + 35 }, g);
+      if (len === 0.5) el('path', { class: 'flag', d: `M${x - 5.7} ${y + 35} c 1 -8 12 -10 9 -22` }, g);
+      if (len === 1.5) el('circle', { class: 'dot', cx: x + 11, cy: y, r: 2 }, g);
+      const t = el('text', { x, y: 118 }, g);
+      t.textContent = word;
+      if (hyphen) el('line', { class: 'hyphen', x1: x + SPACE[len] / 2 - 3, x2: x + SPACE[len] / 2 + 3, y1: 113, y2: 113 }, g);
+      notes.push({ g, hz: HZ[pitch], len });
+      x += SPACE[len];
+    });
+    el('line', { class: 'bar', x1: x0 + width, x2: x0 + width, y1: 40, y2: 80 });
+  });
+  el('line', { class: 'bar final', x1: start + 4 * width - 4, x2: start + 4 * width - 4, y1: 40, y2: 80 });
+
+  // Play the bars and mark each note as it sounds, as the studio's player does.
+  const button = document.getElementById('play');
+  let playing = null;
+  button.addEventListener('click', () => {
+    if (playing) { playing.stop(); return; }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const beat = 0.42;
+    const timers = [];
+    let t = ctx.currentTime + 0.05, at = 0;
+    for (const n of notes) {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = n.hz;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.22, t + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + n.len * beat * 0.95);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + n.len * beat);
+      timers.push(setTimeout(() => n.g.classList.add('on'), at * 1000));
+      timers.push(setTimeout(() => n.g.classList.remove('on'), (at + n.len * beat) * 1000));
+      t += n.len * beat;
+      at += n.len * beat;
+    }
+    const label = button.querySelector('span');
+    label.textContent = 'Stop';
+    playing = {
+      stop() {
+        timers.forEach(clearTimeout);
+        notes.forEach(n => n.g.classList.remove('on'));
+        ctx.close();
+        label.textContent = 'Play these bars';
+        playing = null;
+      },
+    };
+    timers.push(setTimeout(() => playing && playing.stop(), at * 1000 + 100));
+  });
+</script>
+</body>
+</html>

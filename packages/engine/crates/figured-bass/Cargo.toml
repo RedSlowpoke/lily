@@ -1,0 +1,16 @@
+[package]
+name = "lily-engine-figured-bass"
+description = "The engine's figured bass: BassFigures, their lines, continuations and brackets (figured-bass-engraver.cc, figured-bass-position-engraver.cc, figured-bass-continuation.cc, enclosing-bracket.cc), 08 §2.4's figured-bass module (D223)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc. Layout and music only (D223), with the VM's values that
+# both are written in; the core links it, installs its primitives after
+# layout's and gives its classes to a `\layout` translation beside layout's.
+[dependencies]
+lily-engine-layout = { path = "../layout" }
+lily-engine-music = { path = "../music" }
+lily-engine-scheme = { path = "../scheme" }

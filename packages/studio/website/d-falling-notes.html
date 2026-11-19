@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lily Studio</title>
+<meta name="description" content="Write a score, hear it, watch it fall onto the keys. Lily Studio, in your browser or on your Mac.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Figtree:wght@400;600&display=swap" rel="stylesheet">
+<!--
+  Option D: falling notes. The hero is the studio's Piano view: Ode to Joy,
+  the sample score every new user gets, falls onto a keyboard as in piano
+  videos, the right hand in the lily's violet, the left in its stamen's gold.
+-->
+<style>
+  :root {
+    --night: #1f1633;
+    --night-2: #2a1f44;
+    --on-night: #f4effc;
+    --on-night-soft: #b9addb;
+    --right: #b89cf2;
+    --left: #f2d27a;
+    --page: #fbfaff;
+    --ink: #1f1633;
+    --muted: #675d80;
+    --line: #e5e0f0;
+    --violet: #6a4ca6;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page: #151022;
+      --ink: #efeaf9;
+      --muted: #a69cc0;
+      --line: #2c2440;
+      --violet: #b89cf2;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 400 17px/1.6 Figtree, system-ui, sans-serif;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--left); outline-offset: 3px; border-radius: 6px; }
+
+  .stage {
+    position: relative;
+    height: clamp(620px, 100svh, 860px);
+    background: var(--night);
+    color: var(--on-night);
+    overflow: hidden;
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  /* Hide the falling notes behind the words: the top left is night, and
+     the notes come out from under it. */
+  .stage::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(to right, var(--night) 52%, transparent 74%);
+    -webkit-mask-image: linear-gradient(black 52%, transparent 64%);
+    mask-image: linear-gradient(black 52%, transparent 64%);
+    z-index: 1;
+    pointer-events: none;
+  }
+  .over {
+    position: relative;
+    z-index: 2;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  nav {
+    display: flex; justify-content: space-between; align-items: center;
+    height: 72px;
+    font-size: 15px;
+  }
+  nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; }
+  nav .brand img { width: 30px; height: 30px; }
+  nav .links { display: flex; gap: 22px; align-items: center; }
+  nav .links a { color: var(--on-night-soft); text-decoration: none; }
+  nav .links a:hover { color: var(--on-night); }
+  .sound {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255,255,255,.22);
+    border-radius: 999px;
+    background: none;
+    color: var(--on-night);
+    font: 600 13px/1 Figtree, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .sound:hover { border-color: rgba(255,255,255,.5); }
+  .sound svg { width: 14px; height: 14px; fill: currentColor; }
+
+  h1 {
+    margin: 56px 0 18px;
+    max-width: 13em;
+    font: 700 clamp(2.2rem, 5.2vw, 4.25rem)/1.04 Unbounded, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+  .lede { margin: 0 0 28px; max-width: 32em; color: var(--on-night-soft); font-size: 19px; }
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-block;
+    padding: 14px 22px;
+    border-radius: 12px;
+    font: 600 16px/1.2 Figtree, system-ui, sans-serif;
+    text-decoration: none;
+  }
+  .btn.right { background: var(--right); color: var(--night); }
+  .btn.right:hover { background: #cdb8f7; }
+  .btn.left { background: var(--left); color: var(--night); }
+  .btn.left:hover { background: #f7e0a0; }
+  .under { margin-top: 14px; font-size: 13px; color: var(--on-night-soft); }
+  .under a { color: var(--on-night); }
+
+  /* Below the stage */
+  .ways {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 96px 24px 0;
+  }
+  .way {
+    display: grid;
+    grid-template-columns: 270px minmax(0, 1fr) auto;
+    gap: 16px 48px;
+    align-items: start;
+    padding: 32px 0;
+    border-top: 1px solid var(--line);
+  }
+  .way:last-child { border-bottom: 1px solid var(--line); }
+  .way h2 {
+    margin: 0;
+    font: 500 22px/1.25 Unbounded, system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .way .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 10px; vertical-align: 2px; }
+  .way p { margin: 0 0 8px; max-width: 38em; }
+  .way .need { color: var(--muted); font-size: 15px; }
+  .way .btn { background: var(--ink); color: var(--page); white-space: nowrap; }
+  .way .btn:hover { background: var(--violet); }
+
+  .bits {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 88px 24px 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 36px 48px;
+  }
+  .bits h3 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  .bits p { margin: 0; color: var(--muted); }
+  .bits code { font: 14px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--ink); }
+
+  footer {
+    max-width: 1180px;
+    margin: 88px auto 0;
+    padding: 20px 24px 40px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  @media (max-width: 820px) {
+    .stage::before {
+      background: var(--night);
+      -webkit-mask-image: linear-gradient(black 58%, transparent 70%);
+      mask-image: linear-gradient(black 58%, transparent 70%);
+    }
+    h1 { margin-top: 28px; }
+    nav .links .gh { display: none; }
+    .way { grid-template-columns: 1fr; }
+    .bits { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="stage">
+  <canvas id="roll" aria-hidden="true"></canvas>
+  <div class="over">
+    <nav>
+      <a class="brand" href="#"><img src="icon.png" alt="">Lily Studio</a>
+      <span class="links">
+        <a class="gh" href="https://github.com/velet5/lily">GitHub</a>
+        <button class="sound" id="sound" type="button" aria-pressed="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h3l4-3v10L5 10H2z"/><path id="waves" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".35"/></svg>
+          <span>Sound off</span>
+        </button>
+      </span>
+    </nav>
+    <h1>Write the score. Watch it play.</h1>
+    <p class="lede">Lily Studio engraves your LilyPond score as you type, then
+      plays it back, part by part, or onto a falling keyboard like this one.</p>
+    <div class="ctas">
+      <a class="btn right" href="/studio/">Open in your browser</a>
+      <a class="btn left" href="https://github.com/velet5/lily/releases/latest">Download for Mac</a>
+    </div>
+    <p class="under">Free. The Mac app is for macOS 14 or later, on Apple Silicon or <a href="https://github.com/velet5/lily/releases/latest">Intel</a>.</p>
+  </div>
+</header>
+
+<section class="ways" aria-label="Where to run it">
+  <div class="way">
+    <h2><span class="swatch" style="background:var(--right)"></span>In your browser</h2>
+    <div>
+      <p>Sign in and your scores are kept in My Scores, engraved on our
+        server. Upload and download them from the menu bar.</p>
+      <p class="need">You need a browser. Nothing to install.</p>
+    </div>
+    <a class="btn" href="/studio/">Open Lily Studio</a>
+  </div>
+  <div class="way">
+    <h2><span class="swatch" style="background:var(--left)"></span>On your Mac</h2>
+    <div>
+      <p>The same studio with your scores in your own folders, plus Stems:
+        split a song into vocals, drums, bass and the rest, and start a score
+        from any of them.</p>
+      <p class="need">You need macOS 14 and LilyPond; the app walks you through
+        setting it up. Stems needs Apple Silicon.</p>
+    </div>
+    <a class="btn" href="https://github.com/velet5/lily/releases/latest">Download for Mac</a>
+  </div>
+</section>
+
+<section class="bits" aria-label="What it does">
+  <div><h3>Engraved as you type</h3><p>The score beside the text follows each keystroke.</p></div>
+  <div><h3>Mistakes in plain words</h3><p><code>“\stacato” is not a LilyPond command</code>, and a click takes you there.</p></div>
+  <div><h3>Click a note</h3><p>It finds that note in the text.</p></div>
+  <div><h3>Every part, your way</h3><p>Mute a part while it plays, or give it another instrument.</p></div>
+  <div><h3>Piano view</h3><p>Pick the parts whose notes fall, beside the text or under the score.</p></div>
+  <div><h3>PDF and MIDI</h3><p>Export the printable score, or the music with or without its muted parts.</p></div>
+</section>
+
+<footer>
+  <span>Free and MIT licensed. Scores are engraved by <a href="https://lilypond.org">LilyPond</a>.</span>
+  <a href="https://github.com/velet5/lily">Source on GitHub</a>
+</footer>
+
+<script>
+  // Ode to Joy, eight bars: the tune in the right hand, chords in the left.
+  // Times are in beats; midi 60 is middle C.
+  const tune = [
+    [64,1],[64,1],[65,1],[67,1], [67,1],[65,1],[64,1],[62,1],
+    [60,1],[60,1],[62,1],[64,1], [64,1.5],[62,.5],[62,2],
+    [64,1],[64,1],[65,1],[67,1], [67,1],[65,1],[64,1],[62,1],
+    [60,1],[60,1],[62,1],[64,1], [62,1.5],[60,.5],[60,2],
+  ];
+  const C = [48, 52, 55], G = [47, 50, 55];
+  const chords = [C, G, C, G, C, G, C, [G, C]];
+  const notes = [];
+  let beat = 0;
+  for (const [m, d] of tune) { notes.push({ m: m + 12, at: beat, d, hand: 'right' }); beat += d; }
+  chords.forEach((c, bar) => {
+    if (Array.isArray(c[0])) c.forEach((half, i) => half.forEach(m => notes.push({ m: m + 12, at: bar * 4 + i * 2, d: 2, hand: 'left' })));
+    else c.forEach(m => notes.push({ m: m + 12, at: bar * 4, d: 4, hand: 'left' }));
+  });
+  const LENGTH = 34;         // beats, with a breath before it starts again
+  const BPM = 104;
+  const LOW = 55, HIGH = 84; // G3 to C6
+
+  const canvas = document.getElementById('roll');
+  const ctx = canvas.getContext('2d');
+  const css = getComputedStyle(document.documentElement);
+  const color = name => css.getPropertyValue(name).trim();
+  const isBlack = m => [1, 3, 6, 8, 10].includes(m % 12);
+  let keys = [], W = 0, H = 0, keyH = 0, pxPerBeat = 0;
+
+  function layout() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    keyH = Math.max(70, Math.min(120, W * 0.09));
+    pxPerBeat = Math.max(46, H / 9);
+    const whites = [];
+    for (let m = LOW; m <= HIGH; m++) if (!isBlack(m)) whites.push(m);
+    const ww = W / whites.length;
+    keys = [];
+    for (let m = LOW; m <= HIGH; m++) {
+      if (isBlack(m)) {
+        const left = whites.indexOf(m - 1);
+        keys[m] = { x: (left + 1) * ww - ww * 0.3, w: ww * 0.6, black: true };
+      } else {
+        keys[m] = { x: whites.indexOf(m) * ww, w: ww, black: false };
+      }
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h);
+    ctx.fill();
+  }
+
+  function draw(now) {
+    // now: the beat at the keyboard's edge.
+    ctx.clearRect(0, 0, W, H);
+    const floor = H - keyH;
+    const sounding = new Map();
+    for (const n of notes) {
+      for (const loop of [0, LENGTH]) {
+        const at = n.at + loop;
+        const bottom = floor - (at - now) * pxPerBeat;
+        const top = bottom - n.d * pxPerBeat + 3;
+        if (bottom < 0 || top > floor) continue;
+        const k = keys[n.m];
+        if (!k) continue;
+        if (at <= now && now < at + n.d) sounding.set(n.m, n.hand);
+        ctx.fillStyle = n.hand === 'right' ? color('--right') : color('--left');
+        ctx.globalAlpha = sounding.get(n.m) === n.hand && at <= now ? 1 : 0.88;
+        const inset = k.black ? 1 : k.w * 0.12;
+        roundRect(k.x + inset, top, k.w - inset * 2, Math.min(bottom, floor) - top, 6);
+      }
+    }
+    ctx.globalAlpha = 1;
+    // A glow where the notes land.
+    ctx.fillStyle = 'rgba(184, 156, 242, .25)';
+    ctx.fillRect(0, floor - 2, W, 2);
+    // White keys, then black ones over them.
+    for (const pass of [false, true]) {
+      for (let m = LOW; m <= HIGH; m++) {
+        const k = keys[m];
+        if (k.black !== pass) continue;
+        const hand = sounding.get(m);
+        const h = k.black ? keyH * 0.62 : keyH;
+        ctx.fillStyle = hand ? color(hand === 'right' ? '--right' : '--left') : k.black ? '#191226' : '#f6f2fc';
+        ctx.fillRect(k.x + (k.black ? 0 : 0.5), floor, k.w - (k.black ? 0 : 1), h);
+        if (!k.black) {
+          ctx.fillStyle = 'rgba(31, 22, 51, .18)';
+          ctx.fillRect(k.x + k.w - 0.5, floor, 1, h);
+        }
+      }
+    }
+    return sounding;
+  }
+
+  // Sound, once asked for: a soft triangle for each note as it lands.
+  let audio = null;
+  const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+  function sound(n) {
+    if (!audio) return;
+    const t = audio.currentTime, len = n.d * 60 / BPM;
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = hz(n.m);
+    const peak = n.hand === 'right' ? 0.16 : 0.06;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(peak, t + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + len * 0.95);
+    osc.connect(gain).connect(audio.destination);
+    osc.start(t);
+    osc.stop(t + len);
+  }
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let running = !reduce, last = null, pos = -6, lastPos = pos;
+  function frame(t) {
+    if (last !== null) pos += (t - last) / 1000 * BPM / 60;
+    last = t;
+    if (pos >= LENGTH) { pos -= LENGTH; lastPos -= LENGTH; }
+    for (const n of notes) if (n.at > lastPos && n.at <= pos) sound(n);
+    lastPos = pos;
+    draw(pos);
+    if (running) requestAnimationFrame(frame);
+  }
+
+  layout();
+  if (running) requestAnimationFrame(frame);
+  else draw(7.2);
+  addEventListener('resize', () => { layout(); if (!running) draw(pos < 0 ? 7.2 : pos); });
+
+  const button = document.getElementById('sound');
+  button.addEventListener('click', () => {
+    const on = button.getAttribute('aria-pressed') !== 'true';
+    button.setAttribute('aria-pressed', String(on));
+    button.querySelector('span').textContent = on ? 'Sound on' : 'Sound off';
+    document.getElementById('waves').setAttribute('opacity', on ? '1' : '.35');
+    if (on) {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      // With reduced motion, the notes move only once sound is asked for.
+      if (!running) { running = true; last = null; pos = Math.max(pos, 0); lastPos = pos; requestAnimationFrame(frame); }
+    } else {
+      audio && audio.close();
+      audio = null;
+      if (reduce) running = false;
+    }
+  });
+</script>
+</body>
+</html>

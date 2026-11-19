@@ -1,0 +1,16 @@
+[package]
+name = "lily-engine-tablature"
+description = "The engine's tablature: TabNoteHeads and the tablature staff symbol (tab-note-heads-engraver.cc, tab-staff-symbol-engraver.cc), 08 §2.4's tablature module (D223)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc. Layout and music only (D223), with the VM's values that
+# both are written in; the core links it and gives its classes to a
+# `\layout` translation beside layout's.
+[dependencies]
+lily-engine-layout = { path = "../layout" }
+lily-engine-music = { path = "../music" }
+lily-engine-scheme = { path = "../scheme" }

@@ -1,0 +1,17 @@
+[package]
+name = "lily-engine-music"
+description = "The engine's music model: LilyPond's moments, durations, pitches and scales with their ly: functions, then music, contexts and translation (docs/research/wasm-engine/04-music-model.md, N1–N8)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# no_std with alloc, as the Scheme it gives its values to, and the MIDI
+# writer its performances are written with (MS5 step 1). libm for the
+# rounding LilyPond does in doubles (rint, floor), which core does not have
+# on stable.
+[dependencies]
+lily-engine-scheme = { path = "../scheme" }
+lily-engine-smf = { path = "../smf" }
+libm = { version = "0.2.16", default-features = false }

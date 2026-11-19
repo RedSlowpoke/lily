@@ -1,0 +1,13 @@
+[package]
+name = "lily-engine-spike"
+description = "A stripped-down engine timed on phones: notes and durations on one staff, a tiny Scheme, SVG (docs/research/wasm-engine/09-spike.md)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# The cdylib is a core behind chapter 08 §4.2's ABI, which scripts/build.mjs
+# ships with CORE=spike; the rlib is for the native tests.
+[lib]
+crate-type = ["cdylib", "rlib"]

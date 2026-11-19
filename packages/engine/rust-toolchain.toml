@@ -1,0 +1,7 @@
+# The nightly of the wasm build only (08-integration.md §1.3): -Zbuild-std and
+# -Cpanic=immediate-abort are unstable. Native builds and tests run on stable,
+# so package.json's scripts call `cargo +stable` (DECISIONS D57).
+[toolchain]
+channel = "nightly-2026-05-24"
+components = ["rust-src"]
+targets = ["wasm32-unknown-unknown"]

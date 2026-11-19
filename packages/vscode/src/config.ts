@@ -1,0 +1,63 @@
+import * as vscode from 'vscode'
+import type { AutoPreviewSettings } from './preview/autoPreview'
+import type { PreviewColors } from './preview/panel'
+
+// Typed access to the `lily.*` settings contributed in package.json. Values are
+// read on every call, never cached, so a change applies to the next compile
+// without a reload (DECISIONS D9).
+
+export interface CompileSettings {
+  /** `lily.lilypond.path`; empty means "search PATH". */
+  lilypondPath: string
+  /** `lily.compile.extraArgs`; an array, so arguments may contain spaces (D3). */
+  extraArgs: string[]
+  acceleration: 'off' | 'cache' | 'auto'
+}
+
+export function getCompileSettings(scope?: vscode.ConfigurationScope): CompileSettings {
+  const config = vscode.workspace.getConfiguration('lily', scope)
+  const extraArgs = config.get<unknown>('compile.extraArgs')
+  return {
+    acceleration: config.get<'off' | 'cache' | 'auto'>('preview.acceleration', 'auto'),
+    lilypondPath: config.get<string>('lilypond.path', '').trim(),
+    // settings.json is hand-edited; drop anything that is not an argument.
+    extraArgs: Array.isArray(extraArgs)
+      ? extraArgs.filter((arg): arg is string => typeof arg === 'string' && arg.length > 0)
+      : [],
+  }
+}
+
+export interface PreviewSettings {
+  /** `lily.preview.colors`. */
+  colors: PreviewColors
+  /** `lily.preview.followCursor`: highlight in the score what the cursor is on. */
+  followCursor: boolean
+  /** `lily.preview.followEditor`: the preview turns to the `.ly` file the editor shows. */
+  followEditor: boolean
+}
+
+export function getPreviewSettings(): PreviewSettings {
+  const config = vscode.workspace.getConfiguration('lily')
+  return {
+    colors: config.get<unknown>('preview.colors') === 'paper' ? 'paper' : 'theme',
+    followCursor: config.get<unknown>('preview.followCursor') !== false,
+    followEditor: config.get<unknown>('preview.followEditor') !== false,
+  }
+}
+
+/** Upper bound of `lily.preview.refreshDelay`; a longer wait reads as "broken". */
+const MAX_REFRESH_DELAY_MS = 5000
+
+/** `lily.preview.refreshOnSave` and `lily.preview.refreshDelay`. */
+export function getAutoPreviewSettings(): AutoPreviewSettings {
+  const config = vscode.workspace.getConfiguration('lily')
+  const delay = config.get<unknown>('preview.refreshDelay')
+  return {
+    enabled: config.get<unknown>('preview.refreshOnSave') !== false,
+    onChange: config.get<unknown>('preview.refreshOnChange') !== false,
+    delayMs:
+      typeof delay === 'number' && Number.isFinite(delay)
+        ? Math.min(Math.max(delay, 0), MAX_REFRESH_DELAY_MS)
+        : 150,
+  }
+}

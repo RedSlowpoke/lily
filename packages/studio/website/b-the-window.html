@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lily Studio</title>
+<meta name="description" content="Type the notes, and the score follows. Lily Studio, on your Mac or in your browser.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Music&display=swap" rel="stylesheet">
+<!--
+  Option B: the window. The hero is the studio itself, drawn in HTML: a
+  score is typed into the editor, engraved note by note in the preview, then
+  a mistake is made, explained, and fixed. Below it, what runs where.
+-->
+<style>
+  :root {
+    --haze: #ece8f5;
+    --page: #ffffff;
+    --ink: #1f1f1f;
+    --muted: #6b6b6b;
+    --line: #e2e2e0;
+    --side: #f5f5f4;
+    --violet: #6a4ca6;
+    --violet-dark: #523889;
+    --app-accent: #2f6fb0;
+    --selected: rgba(47, 111, 176, 0.14);
+    --warning: #a8570a;
+    --warning-bg: #fdf3e7;
+    --error: #d1453b;
+    --code-kw: #8b3fb5;
+    --code-str: #a3501c;
+    --code-note: #1f1f1f;
+    --code-bar: #9a9a9a;
+    --code-num: #2f6fb0;
+    --staff: #8d8d8d;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --haze: #1b1823;
+      --page: #141218;
+      --ink: #e4e2e8;
+      --muted: #96929e;
+      --line: #333038;
+      --side: #252526;
+      --violet: #b49ae6;
+      --violet-dark: #cbb7f0;
+      --app-accent: #4d9be6;
+      --selected: rgba(77, 155, 230, 0.2);
+      --warning: #e0a060;
+      --warning-bg: #3a2c1c;
+      --error: #f07068;
+      --code-kw: #c98be6;
+      --code-str: #e0a070;
+      --code-note: #d4d4d4;
+      --code-bar: #7a7a7a;
+      --code-num: #6fb0f0;
+      --staff: #777;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 400 17px/1.55 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 4px; }
+
+  .hero { background: var(--haze); padding: 0 24px; }
+  .wrap { max-width: 1160px; margin: 0 auto; }
+
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 68px;
+    font-size: 15px;
+  }
+  nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; text-decoration: none; }
+  nav .brand img { width: 30px; height: 30px; }
+  nav a.gh { color: var(--muted); text-decoration: none; }
+  nav a.gh:hover { color: var(--ink); }
+
+  .lead {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 24px 64px;
+    align-items: end;
+    padding: 56px 0 48px;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(2.6rem, 6vw, 4.5rem);
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+  }
+  .lead p { margin: 0 0 22px; font-size: 19px; color: var(--muted); max-width: 30em; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font: 600 16px/1.2 inherit;
+    font-family: inherit;
+    text-decoration: none;
+    background: var(--violet);
+    color: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .btn:not(.secondary) { color: #141218; }
+  }
+  .btn:hover { background: var(--violet-dark); }
+  .btn.secondary { background: var(--page); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+  .btn.secondary:hover { background: var(--side); }
+  .btn svg { width: 16px; height: 16px; fill: currentColor; }
+  .lead p.fine { font-size: 13px; margin: 10px 0 0; }
+  .fine a { color: var(--violet); }
+
+  /* The window */
+  .window {
+    position: relative;
+    top: 40px;
+    margin-top: -8px;
+    border-radius: 12px;
+    background: var(--page);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.08), 0 30px 60px -20px rgba(40, 20, 80, .35);
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .titlebar {
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    height: 36px;
+    background: var(--side);
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .lights { position: absolute; left: 14px; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .panes {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1.15fr);
+    height: 380px;
+  }
+  .sidebar { background: var(--side); border-right: 1px solid var(--line); padding: 10px 8px; }
+  .switch {
+    display: grid; grid-template-columns: 1fr 1fr;
+    background: rgba(0,0,0,.06); border-radius: 6px; padding: 2px; margin-bottom: 12px;
+    text-align: center; font-size: 12px;
+  }
+  .switch span { padding: 3px 0; border-radius: 5px; color: var(--muted); }
+  .switch span.on { background: var(--page); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .folder { color: var(--muted); font-size: 11px; font-weight: 600; padding: 4px 8px; }
+  .file { padding: 3px 8px 3px 22px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file.on { background: var(--selected); }
+
+  .editor {
+    border-right: 1px solid var(--line);
+    padding: 12px 0;
+    font: 12.5px/1.65 ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    overflow: hidden;
+  }
+  .editor .row { display: flex; white-space: pre; }
+  .editor .ln { width: 38px; padding-right: 12px; text-align: right; color: var(--code-bar); flex: none; }
+  .k { color: var(--code-kw); }
+  .s { color: var(--code-str); }
+  .n { color: var(--code-num); }
+  .b { color: var(--code-bar); }
+  .err { text-decoration: underline wavy var(--error); text-underline-offset: 3px; text-decoration-skip-ink: none; }
+  .caret {
+    display: inline-block; width: 1.5px; height: 1.2em; margin-bottom: -0.2em;
+    background: var(--ink);
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .preview { position: relative; padding: 18px 20px; display: flex; flex-direction: column; }
+  .banner {
+    display: flex; gap: 8px; align-items: flex-start;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--warning-bg);
+    color: var(--warning);
+    font-size: 12.5px;
+    opacity: 0; transform: translateY(-4px);
+    transition: opacity .2s, transform .2s;
+  }
+  .banner.show { opacity: 1; transform: none; }
+  .banner b { font-weight: 600; }
+  .sheet { margin-top: 10px; flex: 1; }
+  .sheet .title { text-align: center; font: 600 18px/1.2 'Century Schoolbook', Georgia, serif; margin: 8px 0 2px; }
+  .sheet svg { width: 100%; height: auto; overflow: visible; }
+  .sheet .line { stroke: var(--staff); stroke-width: .9; }
+  .sheet .bar { stroke: var(--ink); stroke-width: 1.1; }
+  .sheet .clef { font-family: 'Noto Music', serif; fill: var(--ink); }
+  .sheet .time { font: 700 21px/1 Georgia, serif; fill: var(--ink); }
+  .sheet .head { fill: var(--ink); }
+  .sheet .head.open { fill: none; stroke: var(--ink); stroke-width: 1.6; }
+  .sheet .stem, .sheet .flag { stroke: var(--ink); stroke-width: 1.2; fill: none; }
+  .sheet .dot { fill: var(--ink); }
+  .sheet .note { animation: ink .25s ease-out; }
+  .sheet .note.staccato .dot2 { fill: var(--ink); }
+  @keyframes ink { from { opacity: 0; } }
+  .status {
+    display: flex; justify-content: space-between;
+    height: 24px; padding: 0 12px;
+    border-top: 1px solid var(--line);
+    background: var(--side);
+    color: var(--muted);
+    font-size: 11.5px; line-height: 24px;
+  }
+  .status .live::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #28c840; margin-right: 6px; vertical-align: 1px; }
+
+  /* What runs where */
+  main { padding: 120px 24px 0; }
+  h2 { font-size: 30px; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .intro { color: var(--muted); margin: 0 0 32px; max-width: 36em; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { vertical-align: bottom; border-bottom: 2px solid var(--ink); padding-bottom: 18px; }
+  thead th .btn { margin-top: 12px; }
+  thead .where { font-size: 20px; letter-spacing: -0.01em; }
+  thead .what { color: var(--muted); font-weight: 400; font-size: 14px; }
+  td:first-child { font-weight: 600; width: 34%; }
+  td { color: var(--ink); }
+  td.no { color: var(--muted); }
+  .yes::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--violet); margin-right: 10px; vertical-align: 1px; }
+
+  footer { padding: 72px 24px 40px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--line); padding-top: 20px; }
+
+  @media (max-width: 860px) {
+    .lead { grid-template-columns: 1fr; padding: 32px 0 36px; }
+    .panes { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .sidebar { display: none; }
+    .editor { border-right: 0; border-bottom: 1px solid var(--line); height: 230px; }
+    .preview { min-height: 260px; }
+    td:first-child { width: auto; }
+    th, td { padding: 12px 8px; }
+    thead th .btn { padding: 10px 12px; font-size: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .caret { animation: none; }
+    .sheet .note { animation: none; }
+    .banner { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="wrap">
+    <nav>
+      <a class="brand" href="#"><img src="icon.png" alt="">Lily Studio</a>
+      <a class="gh" href="https://github.com/velet5/lily">GitHub</a>
+    </nav>
+
+    <div class="lead">
+      <h1>Type the notes.<br>The score follows.</h1>
+      <div>
+        <p>A small studio for LilyPond scores, for people who don’t program:
+          your files, the text and the engraved score in one window.</p>
+        <div class="buttons">
+          <a class="btn" href="/studio/">Open in your browser</a>
+          <a class="btn secondary" href="https://github.com/velet5/lily/releases/latest">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 1h2v8.2l2.8-2.8 1.4 1.4L8 13 2.8 7.8l1.4-1.4L7 9.2zM2 14h12v2H2z"/></svg>
+            Download for Mac</a>
+        </div>
+        <p class="fine">Free. Version 0.1.0 for macOS 14 or later, Apple Silicon or <a href="https://github.com/velet5/lily/releases/latest">Intel</a>.</p>
+      </div>
+    </div>
+
+    <div class="window" aria-label="Lily Studio's window: a score being typed and engraved" role="img">
+      <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span>Ode to Joy.ly</div>
+      <div class="panes">
+        <aside class="sidebar" aria-hidden="true">
+          <div class="switch"><span class="on">Scores</span><span>Stems</span></div>
+          <div class="folder">Lily Studio</div>
+          <div class="file">Minuet in G.ly</div>
+          <div class="file on">Ode to Joy.ly</div>
+          <div class="file">Scarborough Fair.ly</div>
+          <div class="file">Sketches.ly</div>
+        </aside>
+        <div class="editor" id="editor" aria-hidden="true"></div>
+        <div class="preview" aria-hidden="true">
+          <div class="banner" id="banner"><span>⚠</span><span><b>“\stacato” is not a LilyPond command.</b> Check its spelling, or whether a backslash is missing or extra.</span></div>
+          <div class="sheet">
+            <div class="title">Ode to Joy</div>
+            <svg id="staff" viewBox="0 20 400 180"></svg>
+          </div>
+        </div>
+      </div>
+      <div class="status" aria-hidden="true"><span class="live">Live preview</span><span id="pos">Ln 6, Col 3</span></div>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="wrap">
+    <h2>One studio, two places to run it</h2>
+    <p class="intro">The browser has everything you need to write, hear and
+      print a score. The Mac app adds Stems, and keeps your scores in your own folders.</p>
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th><div class="where">In your browser</div><div class="what">Nothing to install</div>
+            <a class="btn" href="/studio/">Open</a></th>
+          <th><div class="where">On your Mac</div><div class="what">macOS 14 or later</div>
+            <a class="btn secondary" href="https://github.com/velet5/lily/releases/latest">Download</a></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Engraved as you type</td><td class="yes"></td><td class="yes"></td></tr>
+        <tr><td>Mistakes explained in plain words</td><td class="yes"></td><td class="yes"></td></tr>
+        <tr><td>Play, mute a part, change its instrument</td><td class="yes"></td><td class="yes"></td></tr>
+        <tr><td>Piano view, notes falling onto the keys</td><td class="yes"></td><td class="yes"></td></tr>
+        <tr><td>Export PDF and MIDI</td><td class="yes"></td><td class="yes"></td></tr>
+        <tr><td>Stems: split a song, start a score from a stem</td><td class="no">Not in the browser</td><td class="yes">Apple Silicon</td></tr>
+        <tr><td>Where your scores are kept</td><td>My Scores, after you sign in</td><td>Any folder on your Mac</td></tr>
+        <tr><td>What you need</td><td>A browser</td><td>LilyPond; the app walks you through it</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Lily Studio is free and MIT licensed. Scores are engraved by <a href="https://lilypond.org">LilyPond</a>.</span>
+    <a href="https://github.com/velet5/lily">Source on GitHub</a>
+  </div>
+</footer>
+
+<script>
+  // The script the editor plays: fixed lines, then the notes typed one by one,
+  // then a misspelt command that the banner explains, then its fix.
+  const NOTES = [
+    ['e4', 'E5', 1], ['e', 'E5', 1], ['f', 'F5', 1], ['g', 'G5', 1], '|',
+    ['g', 'G5', 1], ['f', 'F5', 1], ['e', 'E5', 1], ['d', 'D5', 1], '|', '\n',
+    ['c', 'C5', 1], ['c', 'C5', 1], ['d', 'D5', 1], ['e', 'E5', 1], '|',
+    ['e4.', 'E5', 1.5], ['d8', 'D5', 0.5], ['d2', 'D5', 2], '|',
+  ];
+  const HEAD = [
+    '<span class="k">\\version</span> <span class="s">"2.24.4"</span>',
+    '<span class="k">\\header</span> { title = <span class="s">"Ode to Joy"</span> }',
+    '',
+    '<span class="k">\\relative</span> c\'\' {',
+    '  <span class="k">\\time</span> <span class="n">4/4</span>',
+  ];
+  const editor = document.getElementById('editor');
+  const banner = document.getElementById('banner');
+  const pos = document.getElementById('pos');
+  const svg = document.getElementById('staff');
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs, parent = svg) => {
+    const node = document.createElementNS(NS, name);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    parent.appendChild(node);
+    return node;
+  };
+
+  // The engraved side: the first n notes, two bars to a system.
+  const Y = { C5: 55, D5: 50, E5: 45, F5: 40, G5: 35 };
+  const SPACE = { 0.5: 22, 1: 30, 1.5: 38, 2: 38 };
+  const WIDTH = 396;
+  function staff(top, first) {
+    for (let i = 0; i < 5; i++) el('line', { class: 'line', x1: 0, x2: WIDTH, y1: top + 40 + i * 10, y2: top + 40 + i * 10 });
+    el('line', { class: 'bar', x1: 0, x2: 0, y1: top + 40, y2: top + 80 });
+    el('text', { class: 'clef', x: 4, y: top + 70, 'font-size': 50 }).textContent = '\u{1D11E}';
+    if (first) {
+      el('text', { class: 'time', x: 44, y: top + 58 }).textContent = '4';
+      el('text', { class: 'time', x: 44, y: top + 78 }).textContent = '4';
+    }
+  }
+  function engrave(n, staccato) {
+    svg.textContent = '';
+    staff(0, true);
+    let x = 82, top = 0, shown = 0, bars = 0, stretch = 1;
+    for (const t of NOTES) {
+      if (t === '\n') continue;
+      if (t === '|') {
+        bars++;
+        x += 2;
+        if (bars === 4) {
+          el('line', { class: 'bar', x1: WIDTH - 6, x2: WIDTH - 6, y1: top + 40, y2: top + 80 });
+          el('rect', { class: 'head', x: WIDTH - 3.5, y: top + 40, width: 3.5, height: 40 });
+        } else if (bars === 2) {
+          el('line', { class: 'bar', x1: WIDTH, x2: WIDTH, y1: top + 40, y2: top + 80 });
+          if (shown >= n) break;
+          top = 100;
+          staff(top, false);
+          x = 56;
+          stretch = 1.17;
+        } else el('line', { class: 'bar', x1: x, x2: x, y1: top + 40, y2: top + 80 });
+        x += 22;
+        continue;
+      }
+      if (shown >= n) break;
+      const [, pitch, len] = t;
+      const y = top + Y[pitch];
+      const g = el('g', { class: 'note' });
+      el('ellipse', { class: 'head' + (len === 2 ? ' open' : ''), cx: x, cy: y, rx: 6, ry: 4.2, transform: `rotate(-20 ${x} ${y})` }, g);
+      el('line', { class: 'stem', x1: x - 5.4, x2: x - 5.4, y1: y + 1.5, y2: y + 34 }, g);
+      if (len === 0.5) el('path', { class: 'flag', d: `M${x - 5.4} ${y + 34} c 1 -8 11 -10 8 -21` }, g);
+      if (len === 1.5) el('circle', { class: 'dot', cx: x + 10, cy: y, r: 1.9 }, g);
+      if (staccato && shown === 0) el('circle', { class: 'dot', cx: x, cy: y - 10, r: 1.9 }, g);
+      x += SPACE[len] * stretch;
+      shown++;
+    }
+  }
+
+  // The text side.
+  function noteHtml(t) {
+    if (t === '|') return '<span class="b">|</span>';
+    return t[0].replace(/(\d+\.?)/, '<span class="n">$1</span>');
+  }
+  const BODY = (() => {
+    // Lines of tokens, each token typed after the previous one and a space.
+    const lines = [[]];
+    for (const t of NOTES) t === '\n' ? lines.push([]) : lines.at(-1).push(t);
+    return lines;
+  })();
+  function render(typed, partial, after) {
+    // typed: tokens shown in full; partial: characters of the next one;
+    // after: what is typed just after the first note, caret and all.
+    const rows = HEAD.slice();
+    let count = 0, caretRow = 0, caretCol = 0;
+    BODY.forEach((line, li) => {
+      const parts = [];
+      let plain = '  ';
+      for (const t of line) {
+        const word = t === '|' ? '|' : t[0];
+        if (count < typed) {
+          parts.push(noteHtml(t) + (li === 0 && parts.length === 0 && after ? after : ''));
+          plain += word + ' ';
+        } else if (count === typed && partial) {
+          parts.push(word.slice(0, partial));
+          plain += word.slice(0, partial);
+        }
+        count++;
+      }
+      if (parts.length || li === 0) {
+        rows.push('  ' + parts.join(' '));
+        caretRow = rows.length;
+        caretCol = plain.length + 1;
+      }
+    });
+    rows.push('}');
+    const caret = '<span class="caret"></span>';
+    editor.innerHTML = rows.map((r, i) =>
+      `<div class="row"><span class="ln">${i + 1}</span><span>${r}${i + 1 === caretRow && !after ? caret : ''}</span></div>`
+    ).join('');
+    pos.textContent = after ? 'Ln 6, Col 5' : `Ln ${caretRow}, Col ${caretCol}`;
+  }
+
+  const tokens = NOTES.filter(t => t !== '\n');
+  const noteCount = k => tokens.slice(0, k).filter(t => t !== '|').length;
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const CARET = '<span class="caret"></span>';
+
+  async function play() {
+    for (;;) {
+      banner.classList.remove('show');
+      render(0, 0);
+      engrave(0);
+      await wait(900);
+      for (let k = 0; k < tokens.length; k++) {
+        const word = tokens[k] === '|' ? '|' : tokens[k][0];
+        for (let c = 1; c <= word.length; c++) { render(k, c); await wait(70 + Math.random() * 60); }
+        render(k + 1, 0);
+        engrave(noteCount(k + 1));
+        await wait(140);
+      }
+      await wait(1400);
+      // A mistake: a staccato, misspelt, which the banner explains.
+      const typo = '-\\stacato';
+      for (let c = 1; c <= typo.length; c++) {
+        render(tokens.length, 0, typo.slice(0, c) + CARET);
+        await wait(90);
+      }
+      await wait(400);
+      render(tokens.length, 0, '-<span class="k err">\\stacato</span>' + CARET);
+      banner.classList.add('show');
+      await wait(2800);
+      // The fix.
+      render(tokens.length, 0, '-<span class="k">\\stac</span>' + CARET);
+      await wait(300);
+      render(tokens.length, 0, '-<span class="k">\\staccato</span>' + CARET);
+      banner.classList.remove('show');
+      engrave(15, true);
+      await wait(4200);
+    }
+  }
+
+  if (reduce) {
+    render(tokens.length, 0);
+    engrave(15);
+  } else {
+    play();
+  }
+</script>
+</body>
+</html>

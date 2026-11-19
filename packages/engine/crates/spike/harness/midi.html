@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDI playback</title>
+<style>
+  body { margin: 0; padding: 12px 16px; background: #fff; color: #111; font: 15px/1.4 system-ui, sans-serif; }
+  h1 { font-size: 17px; margin: 0 0 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  button, select { font: inherit; padding: 8px 14px; }
+  #play, #stop { min-width: 56px; font-size: 20px; }
+  #time { font: 17px ui-monospace, monospace; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 10px; font: 13px/1.4 ui-monospace, monospace; }
+  dt { color: #555; }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  #log { display: block; white-space: pre-wrap; font: 12px/1.35 ui-monospace, monospace; background: #f3f3f3; padding: 6px 8px; min-height: 4em; }
+</style>
+</head>
+<body>
+<h1>MIDI playback (M8)</h1>
+<div class="row">
+<select id="score" aria-label="Score">
+<option value="T24">T24, bach-bwv610</option>
+<option value="T29">T29, orchestra</option>
+</select>
+<label><input id="session" type="checkbox" checked> audioSession playback</label>
+</div>
+<div class="row">
+<button id="play" type="button" disabled>&#x25B6;&#xFE0E;</button>
+<button id="stop" type="button" disabled>&#x25A0;&#xFE0E;</button>
+<span id="time">0:00 / 0:00</span>
+</div>
+<dl id="readout"></dl>
+<output id="log">Loading…</output>
+<script src="midi.js"></script>
+<script src="midi-page.js"></script>
+</body>
+</html>

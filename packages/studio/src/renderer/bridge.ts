@@ -1,0 +1,428 @@
+// The only bridge between the renderer and Lily Studio's Rust side (DECISIONS
+// D28, D42): `studio`, one command per call (src-tauri/src/commands.rs), and
+// one channel that brings everything the Rust side starts itself — menu
+// commands, compiles, changes on disk, the agents' chats and stem separations
+// (D112). Binary data travels as base64 and is a Uint8Array here. `transport`
+// carries them: the app's Tauri IPC, or on the web the socket to the user's
+// worker (D55).
+import type {
+  AgentId,
+  AgentStatus,
+  ChatEvent,
+  ChatInfo,
+  ChatMessage,
+  Command,
+  Decision,
+  CompileEvent,
+  ExportedGarageBand,
+  ExportedMidi,
+  GarageBandAudio,
+  GarageBandPlan,
+  CompileOutcome,
+  FileChange,
+  FileDrop,
+  FolderListing,
+  LilyPondStatus,
+  MutedPart,
+  OpenChat,
+  Opened,
+  PdfOutcome,
+  PlaybackSetup,
+  RecentList,
+  ListedSeparation,
+  PastSeparation,
+  SeparationAvailability,
+  SeparationEvent,
+  SeparationModel,
+  SeparationRequest,
+  SeparationStatus,
+  ScoreMeter,
+  TempoFound,
+  Transcription,
+  TranscriptionEvent,
+  SetupLink,
+  SourceLocation,
+  TemplateId,
+} from '../ipc'
+import type { PageUpdate } from '../web/engine/protocol'
+import { transport } from './transport'
+
+/** How the Rust side sends a CompileOutcome: MIDI as base64. */
+type WireOutcome = Omit<CompileOutcome, 'midiData'> & { midiData?: string }
+type WireCompileEvent = { kind: 'started'; rootFile: string } | { kind: 'finished'; outcome: WireOutcome }
+type WirePdf = Omit<PdfOutcome, 'files'> & { files: { name: string; data: string }[] }
+
+/** What the channel carries; `type` says which listeners it is for. */
+type StudioEvent =
+  | { type: 'command'; command: Command }
+  | { type: 'compile'; event: WireCompileEvent }
+  /** The web's engine only (D171): what changed of a page of `rootFile`'s, or the page whole, before its compile's outcome (W8, I7). */
+  | { type: 'cells'; rootFile: string; cells: PageUpdate }
+  | { type: 'filesChanged'; changes: FileChange[] }
+  | { type: 'chat'; event: ChatEvent }
+  | { type: 'recentChanged' }
+  | { type: 'openRecent'; path: string }
+  | { type: 'opened'; opened: Opened }
+  | { type: 'separation'; event: SeparationEvent }
+  | { type: 'transcription'; event: TranscriptionEvent }
+
+function bytes(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const data = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) data[i] = binary.charCodeAt(i)
+  return data
+}
+
+function base64(data: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < data.length; i += 0x8000) binary += String.fromCharCode(...data.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+function outcome(wire: WireOutcome): CompileOutcome {
+  const { midiData, ...rest } = wire
+  return midiData === undefined ? rest : { ...rest, midiData: bytes(midiData) }
+}
+
+function compileEvent(wire: WireCompileEvent): CompileEvent {
+  return wire.kind === 'started' ? wire : { kind: 'finished', outcome: outcome(wire.outcome) }
+}
+
+/**
+ * A command's result. A command that fails rejects with its message as a
+ * string; it becomes an Error, as the renderer reports `error.message`.
+ */
+async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await transport.call<T>(command, args)
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
+}
+
+/** Fire and forget, like an IPC `send`: a failure is only logged. */
+function send(command: string, args?: Record<string, unknown>): void {
+  transport.send(command, args)
+}
+
+type Listener<T> = (value: T) => void
+const listeners = {
+  command: new Set<Listener<Command>>(),
+  compile: new Set<Listener<CompileEvent>>(),
+  cells: new Set<Listener<{ rootFile: string; cells: PageUpdate }>>(),
+  filesChanged: new Set<Listener<FileChange[]>>(),
+  chat: new Set<Listener<ChatEvent>>(),
+  recentChanged: new Set<Listener<void>>(),
+  openRecent: new Set<Listener<string>>(),
+  opened: new Set<Listener<Opened>>(),
+  separation: new Set<Listener<SeparationEvent>>(),
+  transcription: new Set<Listener<TranscriptionEvent>>(),
+  fileDrop: new Set<Listener<FileDrop>>(),
+}
+
+function dispatch(event: StudioEvent): void {
+  switch (event.type) {
+    case 'command':
+      return listeners.command.forEach((listener) => listener(event.command))
+    case 'compile': {
+      const compile = compileEvent(event.event)
+      return listeners.compile.forEach((listener) => listener(compile))
+    }
+    case 'cells':
+      return listeners.cells.forEach((listener) => listener(event))
+    case 'filesChanged':
+      return listeners.filesChanged.forEach((listener) => listener(event.changes))
+    case 'chat':
+      return listeners.chat.forEach((listener) => listener(event.event))
+    case 'recentChanged':
+      return listeners.recentChanged.forEach((listener) => listener())
+    case 'openRecent':
+      return listeners.openRecent.forEach((listener) => listener(event.path))
+    case 'opened':
+      return listeners.opened.forEach((listener) => listener(event.opened))
+    case 'separation':
+      return listeners.separation.forEach((listener) => listener(event.event))
+    case 'transcription':
+      return listeners.transcription.forEach((listener) => listener(event.event))
+  }
+}
+
+function subscribe<T>(set: Set<Listener<T>>, listener: Listener<T>): () => void {
+  set.add(listener)
+  return () => set.delete(listener)
+}
+
+/** Resolves once the Rust side sends on the channel; commands that start compiles wait for it. */
+const subscribed = transport.subscribe((event) => dispatch(event as StudioEvent))
+transport.onFileDrop?.((drop) => listeners.fileDrop.forEach((listener) => listener(drop)))
+
+export const studio = {
+  /** On the web (D55): no agents, a LilyPond the server's, files uploaded and downloaded. */
+  hosted: transport.hosted,
+  /** The templates of New Score, as the Rust side has them. */
+  templates: (): Promise<{ id: TemplateId; label: string }[]> => call('templates'),
+
+  /** Asks for a folder; undefined when the dialog was cancelled. */
+  openFolder: (): Promise<Opened | undefined> => call<Opened | null>('open_folder').then(orUndefined),
+  /** Asks for a LilyPond file; its folder becomes the open folder. */
+  openFile: (): Promise<Opened | undefined> => call<Opened | null>('open_file').then(orUndefined),
+  /** Lists the open folder again, or undefined when none is open. */
+  listFolder: (): Promise<FolderListing | undefined> => call<FolderListing | null>('list_folder').then(orUndefined),
+  readFile: (file: string): Promise<string> => call('read_file', { file }),
+  saveFile: async (file: string, text: string): Promise<void> => {
+    await subscribed
+    return call('save_file', { file, text })
+  },
+  /** Asks where to save a new score from `template`, writes it and opens its folder. */
+  newScore: (template: TemplateId): Promise<Opened | undefined> => call<Opened | null>('new_score', { template }).then(orUndefined),
+  /**
+   * File › Import Guitar Pro… (D166): asks for a .gp3, .gp4, .gp5 or .gpx
+   * file, or takes `source`, one dropped on the window, then where to save
+   * its score, writes it and opens it as `newScore` does. Undefined when a
+   * dialog was cancelled; rejects with why a file cannot be imported.
+   */
+  importGuitarPro: (source?: string): Promise<Opened | undefined> =>
+    call<Opened | null>('import_guitar_pro', source === undefined ? {} : { source }).then(orUndefined),
+  /**
+   * The editor now shows `file`: resolves with its score, or undefined when no
+   * score includes it. The score's last result follows at once, then the
+   * compile that brings it up to date, on onCompile (D39).
+   */
+  showScore: async (file: string): Promise<string | undefined> => {
+    await subscribed
+    const shown = await call<{ rootFile: string; kept?: WireOutcome } | null>('show_score', { file })
+    if (!shown) return undefined
+    // After the caller has taken the score as the editor's, so it takes the result too.
+    const kept = shown.kept
+    if (kept) setTimeout(() => dispatch({ type: 'compile', event: { kind: 'finished', outcome: kept } }))
+    return shown.rootFile
+  },
+  /** Tells the Rust side whether any open file has unsaved changes. */
+  setDirty: (dirty: boolean): void => send('set_dirty', { dirty }),
+  /**
+   * Where a `textedit:` link of the preview points; undefined when it is not
+   * one. Rejects when the file is not one the studio may open.
+   */
+  revealSource: (href: string): Promise<SourceLocation | undefined> =>
+    call<SourceLocation | null>('reveal_source', { href }).then(orUndefined),
+  /**
+   * The PDF of the score `rootFile`, compiled into the temp directory (D33);
+   * undefined when a newer PDF compile of it took over.
+   */
+  compilePdf: async (rootFile: string): Promise<PdfOutcome | undefined> => {
+    const wire = await call<WirePdf | null>('compile_pdf', { rootFile })
+    return wire ? { ...wire, files: wire.files.map((file) => ({ name: file.name, data: bytes(file.data) })) } : undefined
+  },
+  /** Writes the PDF of `rootFile` next to it; resolves with the files written. */
+  exportPdf: (rootFile: string): Promise<string[]> => call('export_pdf', { rootFile }),
+  /**
+   * Asks where to save `midi`, the music `rootFile` plays, and writes it
+   * (D54); the panel offers to leave out the `muted` parts. Undefined when
+   * it was cancelled.
+   */
+  exportMidi: (rootFile: string, midi: Uint8Array, muted: MutedPart[]): Promise<ExportedMidi | undefined> =>
+    call<ExportedMidi | null>('export_midi', { rootFile, midi: base64(midi), muted }).then(orUndefined),
+  /**
+   * Export for GarageBand (D162): asks where to write `<score> (GarageBand)/`
+   * and writes in it `midi`, lilypond's MIDI of `rootFile` at the score's own
+   * tempo, rewritten by `plan`, a WAV for each file of `audio` and a read-me
+   * (on the web, the `.mid` alone, downloaded). The panel offers to leave out
+   * the `muted` parts, which the plan keeps. Undefined when it was cancelled.
+   */
+  exportGarageBand: (
+    rootFile: string,
+    midi: Uint8Array,
+    plan: GarageBandPlan,
+    muted: MutedPart[],
+    audio: GarageBandAudio | undefined,
+  ): Promise<ExportedGarageBand | undefined> =>
+    call<ExportedGarageBand | null>('export_garageband', { rootFile, midi: base64(midi), plan, muted, audio: audio ?? null }).then(orUndefined),
+  /**
+   * Asks, in a dialog, whether to reload `file` from disk and lose its unsaved
+   * changes; true for Reload.
+   */
+  confirmReload: (file: string): Promise<boolean> => call('confirm_reload', { file }),
+  /**
+   * The unsaved text of `file` after an edit, or null after a save or reload.
+   * Live preview compiles with these texts (D36).
+   */
+  edited: (file: string, text: string | null): void => send('edited', { file, text }),
+  /** Turns live preview on or off. */
+  setLive: (on: boolean): void => send('set_live', { on }),
+  /** Looks for LilyPond and asks it for its version (D37). */
+  lilypondStatus: (): Promise<LilyPondStatus> => call('lilypond_status'),
+  /** Asks where LilyPond is; undefined when the dialog was cancelled. */
+  chooseLilyPond: (): Promise<LilyPondStatus | undefined> => call<LilyPondStatus | null>('choose_lilypond').then(orUndefined),
+  /** Opens a page of the setup in the browser. */
+  openLink: (link: SetupLink): Promise<void> => call('open_link', { link }),
+  /** Opens the sample score, writing it first when it is not there. */
+  openSample: (): Promise<Opened> => call('open_sample'),
+  /** Looks for Claude Code and Codex and asks each for its version (D40). */
+  agentStatus: (): Promise<AgentStatus[]> => call('agent_status'),
+  /** Asks where `agent` is; undefined when the dialog was cancelled. */
+  chooseAgent: (agent: AgentId): Promise<AgentStatus | undefined> => call<AgentStatus | null>('choose_agent', { agent }).then(orUndefined),
+  /** The model `agent` uses from its next turn; empty for its default. */
+  setAgentModel: (agent: AgentId, model: string): Promise<void> => call('set_agent_model', { agent, model }),
+  /** The chats of the open folder, newest first; empty when none is open. */
+  chatList: (): Promise<ChatInfo[]> => call('chat_list'),
+  /** A chat of the open folder, with its entries; undefined when it is gone. */
+  chatGet: (chatId: string): Promise<OpenChat | undefined> => call<OpenChat | null>('chat_get', { chatId }).then(orUndefined),
+  /**
+   * Sends a message to an agent working in the open folder; resolves with the
+   * chat's id once the turn has started. What follows arrives on onChatEvent.
+   */
+  chatSend: async (message: ChatMessage): Promise<string> => {
+    await subscribed
+    return call('chat_send', { message })
+  },
+  /** A pasted image of a chat (D46) as a data: URL; undefined for any other file. */
+  chatImage: async (file: string): Promise<string | undefined> => {
+    const data = await call<string | null>('chat_image', { file })
+    if (!data) return undefined
+    const type = { jpg: 'jpeg', gif: 'gif', webp: 'webp' }[file.split('.').pop() ?? ''] ?? 'png'
+    return `data:image/${type};base64,${data}`
+  },
+  /** Answers what the agent of `chatId` asked to be allowed (D52). */
+  chatAnswer: (chatId: string, askId: string, decision: Decision): Promise<void> => call('chat_answer', { chatId, askId, decision }),
+  /** Stops the agent of `chatId`, and the commands it started. */
+  chatStop: (chatId: string): Promise<void> => call('chat_stop', { chatId }),
+  chatDelete: (chatId: string): Promise<void> => call('chat_delete', { chatId }),
+  /** The playback setup kept for the score `rootFile` (D45); undefined when there is none. */
+  playbackSetup: (rootFile: string): Promise<PlaybackSetup | undefined> =>
+    call<PlaybackSetup | null>('playback_setup', { rootFile }).then(orUndefined),
+  /** Keeps the playback setup of `rootFile`; an empty one is forgotten. */
+  setPlaybackSetup: (rootFile: string, setup: PlaybackSetup): Promise<void> => call('set_playback_setup', { rootFile, setup }),
+  /** The folders and scores opened last, newest first (D49). */
+  recentList: (): Promise<RecentList> => call('recent_list'),
+  /** Opens an entry of the recent list; rejects, saying where it was, when it is gone. */
+  openRecent: (path: string): Promise<Opened> => call('open_recent', { path }),
+  /** Takes one entry off the recent list. */
+  forgetRecent: (path: string): Promise<void> => call('forget_recent', { path }),
+  clearRecent: (): Promise<void> => call('clear_recent'),
+  /** Runs `listener` whenever the recent list changes, from an open, the list or the menu. */
+  onRecentChanged: (listener: Listener<void>): (() => void) => subscribe(listeners.recentChanged, listener),
+  /** Runs `listener` with the path of an entry chosen in File › Open Recent. */
+  onOpenRecent: (listener: Listener<string>): (() => void) => subscribe(listeners.openRecent, listener),
+  /** Runs `listener` with a score Finder opened with the app, opened as Open Score's choice is (D123). */
+  onOpened: (listener: Listener<Opened>): (() => void) => subscribe(listeners.opened, listener),
+  /** Runs `listener` for each entry of a chat and each start and end of a turn. */
+  onChatEvent: (listener: Listener<ChatEvent>): (() => void) => subscribe(listeners.chat, listener),
+  /** Runs `listener` for each menu command; returns a function that removes it. */
+  onCommand: (listener: Listener<Command>): (() => void) => subscribe(listeners.command, listener),
+  /** Runs `listener` when a compile starts or ends; saving a file starts one (D31). */
+  onCompile: (listener: Listener<CompileEvent>): (() => void) => subscribe(listeners.compile, listener),
+  /** Web only, with the engine (D171): a page's cells, or the page shown whole, before the outcome of the compile that has them (W8, I7). */
+  onCells: (listener: Listener<{ rootFile: string; cells: PageUpdate }>): (() => void) => subscribe(listeners.cells, listener),
+  /** Web only: asks for scores to upload into `folder`, the workspace when not given, and opens them. */
+  upload: (folder: string | undefined): Promise<Opened | undefined> => transport.upload?.(folder) ?? Promise.resolve(undefined),
+  /** Web only: saves `file` in the browser's downloads. */
+  download: (file: string): Promise<void> => transport.download?.(file) ?? Promise.resolve(),
+  /** Resolves once the newest compile's music of `rootFile` is here: on the web, the engine's, performed after the page (D264). */
+  music: (rootFile: string): Promise<void> => transport.music?.(rootFile) ?? Promise.resolve(),
+  /** Says whether the music plays: on the web the engine performs at once while it does (D264). */
+  playing: (on: boolean): void => transport.playing?.(on),
+  /**
+   * Whether stems can be separated here (D112): in the app, not on the web,
+   * where every separation call rejects with `reason`.
+   */
+  separationAvailable: (): SeparationAvailability => transport.separation,
+  /** Where the separation's project and uv are, and what is missing. */
+  separationStatus: (): Promise<SeparationStatus> => call('separation_status'),
+  /** The models karaoke-mlx knows; rejects when the project or uv is missing. */
+  separationModels: (): Promise<SeparationModel[]> => call('separation_models'),
+  /**
+   * Separates `request`'s song next to it, one separation at a time; resolves
+   * with the stems' folder. Its progress, and its `done` or `error`, arrive on
+   * onSeparation; a cancelled one rejects with "Cancelled.".
+   */
+  separate: async (request: SeparationRequest): Promise<string> => {
+    await subscribed
+    return call('separate', { request })
+  },
+  /** Ends the running separation; false when none was running. */
+  cancelSeparation: (): Promise<boolean> => call('separation_cancel'),
+  /**
+   * Asks where to save a mix of `files`, stems of one separation, and writes
+   * it; undefined when the panel was cancelled.
+   */
+  mixStems: (files: string[]): Promise<string | undefined> => call<string | null>('mix_stems', { files }).then(orUndefined),
+  /**
+   * Export Video (D140), in the app only: asks where to save the karaoke of
+   * `rootFile` and starts ffmpeg for frames of `size`; undefined when the
+   * panel was cancelled. Then the melody's WAV in parts, the frames as JPEGs,
+   * and the end, with the recordings chosen (D155); or a cancel.
+   */
+  videoStart: (rootFile: string, size: { width: number; height: number; fps: number }): Promise<string | undefined> =>
+    call<string | null>('video_start', { rootFile, size }).then(orUndefined),
+  videoAudio: (chunk: Uint8Array): Promise<void> => call('video_audio', { chunk: base64(chunk) }),
+  videoFrame: (frame: Uint8Array): Promise<void> => call('video_frame', { frame: base64(frame) }),
+  /** Resolves with the file written, the sound from `start` s of the score, below 0 after a silence (D149); undefined when the export was cancelled meanwhile. */
+  videoFinish: (recordings: { path: string; offset: number; volume: number }[], start = 0, seconds?: number): Promise<string | undefined> =>
+    call<string | null>('video_finish', { recordings, start, seconds: seconds ?? null }).then(orUndefined),
+  videoCancel: (): Promise<boolean> => call('video_cancel'),
+  /** Shows a separated folder, or a stem in one, in the Finder. */
+  revealInFinder: (path: string): Promise<void> => call('reveal_in_finder', { path }),
+  /** The songs separated before, last opened first (D114). */
+  separations: (): Promise<ListedSeparation[]> => call('separations'),
+  /** Opens a song on that list: its stems play, mix and score from now on. Rejects when its folder is gone. */
+  openSeparation: (folder: string): Promise<PastSeparation> => call('open_separation', { folder }),
+  /** Asks for a folder of stems separated before and opens it; undefined when the panel was cancelled. */
+  chooseSeparation: (): Promise<PastSeparation | undefined> => call<PastSeparation | null>('choose_separation').then(orUndefined),
+  /** Takes a song off that list; its stems stay where they are. */
+  forgetSeparation: (folder: string): Promise<void> => call('forget_separation', { folder }),
+  /** Asks for a song to separate; undefined when the panel was cancelled. */
+  chooseSong: (): Promise<string | undefined> => call<string | null>('choose_song').then(orUndefined),
+  /**
+   * Writes `text`, a score for `stem` (files.ts's stemScore), beside the stem
+   * as `<name>.ly`, or `<name> 2.ly` when that is taken, and opens it.
+   */
+  newScoreForStem: (stem: string, name: string, text: string): Promise<Opened> => call('new_score_for_stem', { stem, name, text }),
+  /**
+   * The stem `stem`, as the `% Stem:` line of `score`, an open score, names a
+   * file beside it; it plays from stemUrl from now on. Rejects when there is none.
+   */
+  attachStem: (score: string, stem: string): Promise<string> => call('attach_stem', { score, stem }),
+  /**
+   * Add audio… (D155): asks for a recording for `score`, an open score, and
+   * answers its name beside the score; one from elsewhere is copied there
+   * first (`copied`). Undefined when the panel was cancelled.
+   */
+  chooseAudio: (score: string): Promise<{ name: string; copied: boolean } | undefined> =>
+    call<{ name: string; copied: boolean } | null>('choose_audio', { score }).then(orUndefined),
+  /**
+   * Transcribes `stem`, a stem of a separation finished in this run, as
+   * `instrument` (its stem name: `bass`, `vocals`…; D113), one at a time.
+   * Its progress, its warnings, and its `done` or `error`, arrive on
+   * onTranscription; the warnings are in the answer too (D134).
+   */
+  transcribeStem: async (stem: string, instrument: string): Promise<Transcription> => {
+    await subscribed
+    return call('transcribe_stem', { stem, instrument })
+  },
+  /**
+   * From the recording (D159): the tempo and bar 1 of `audio`, the recording
+   * the `% Audio:` line of `score`, an open score, names, once its audio track
+   * is attached (attachStem). Its progress arrives on onTranscription. It
+   * writes nothing.
+   */
+  detectTempo: async (score: string, audio: string, meter: ScoreMeter): Promise<TempoFound> => {
+    await subscribed
+    return call('detect_tempo', { score, audio, meter })
+  },
+  /** Runs `listener` for each event of the running transcription, or of detectTempo: progress and warnings, then `done` or `error`. */
+  onTranscription: (listener: Listener<TranscriptionEvent>): (() => void) => subscribe(listeners.transcription, listener),
+  /** Where `<audio>` plays a stem from: one of a separation finished in this run, or an attached one. */
+  stemUrl: (path: string): string => transport.fileUrl?.(path) ?? '',
+  /** Runs `listener` for files dragged over the app's window and dropped; never on the web. */
+  onFileDrop: (listener: Listener<FileDrop>): (() => void) => subscribe(listeners.fileDrop, listener),
+  /** Runs `listener` for each event of the running separation: progress, then `done` or `error`. */
+  onSeparation: (listener: Listener<SeparationEvent>): (() => void) => subscribe(listeners.separation, listener),
+  /** Runs `listener` when open files or the score's includes change on disk (D34). */
+  onFilesChanged: (listener: Listener<FileChange[]>): (() => void) => subscribe(listeners.filesChanged, listener),
+}
+
+function orUndefined<T>(value: T | null): T | undefined {
+  return value ?? undefined
+}
+
+export type StudioApi = typeof studio

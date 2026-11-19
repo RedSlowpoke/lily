@@ -1,0 +1,157 @@
+# The engine's 132 test scores: chapter 00 §4's T01–T30, chapter 07 §2.3's
+# M01–M12, and README §5's MS8 scores: Y01–Y05 for Y8's first five grobs
+# (KeyCancellation, RehearsalMark, TextMark, PhrasingSlur, RepeatTie; MS8
+# step 7), Y06–Y14 for step 7's rest (CodaMark, SegnoMark, SectionLabel,
+# JumpScript, A37's paths), Y15–Y23 for step 7's part 2 (the percent
+# repeats, CaesuraScript, CueClef, InstrumentSwitch, CombineTextScript,
+# Parentheses), Y24–Y31 for step 8's part 1 (the piano pedals, the pitched
+# trills and their trill line, NoteName, MelodyItem, VowelTransition),
+# Y32–Y40 for its part 2 (Ambitus, ClusterSpanner, BalloonText, Footnote,
+# GridLine, MeasureGrouping, MeasureSpanner, the completion engravers),
+# Y41–Y44 for step 9's part 1 (LigatureBracket, MensuralLigature),
+# Y45–Y50 for its part 2 (Episema, VaticanaLigature, Custos, Divisio,
+# KievanLigature), Y51–Y64 for its part 3 (the page breakers:
+# ly:one-page-breaking, ly:minimal-breaking, ly:one-line-breaking,
+# ly:one-line-auto-height-breaking, ly:page-turn-breaking with
+# Page_turn_engraver), Y65–Y83 for step 10 (Quote_iterator's thirteen
+# quote scores, \fine's fine-event, \lyricsto Type = id, a number list,
+# expect-error and ly:parser-clear-error, \autoChange's tagged \change),
+# Y84–Y89 for step 11 (accreg.ly's syntax-case macro, S6's qr part's three
+# \qr-code scores, its modal part's \modalTranspose and \retrograde), Y90 for C2.6
+# (completionBusy: lyrics on Completion_heads_engraver's split notes).
+# Columns, tab-separated: ID, where the file is
+# (repo: this repository; lilypond: LilyPond's at tag v2.26.0, which
+# fetch.mjs checks out outside the repository, as 00 §4 says), its path
+# there.
+T01	repo	packages/vscode/test/fixtures/hello.ly
+T02	repo	packages/vscode/test/e2e/workspace/score.ly
+T03	repo	packages/vscode/test/fixtures/broken.ly
+T04	lilypond	input/regression/lyric-combine.ly
+T05	lilypond	input/regression/chord-name-entry.ly
+T06	lilypond	input/regression/figured-bass.ly
+T07	lilypond	input/regression/drums.ly
+T08	lilypond	input/regression/tuplet-nest.ly
+T09	lilypond	input/regression/grace.ly
+T10	lilypond	input/regression/repeat-volta.ly
+T11	lilypond	input/regression/beam-cross-staff.ly
+T12	lilypond	input/regression/slur-scoring.ly
+T13	lilypond	input/regression/markup-syntax.ly
+T14	lilypond	input/regression/music-function.ly
+T15	lilypond	input/regression/scheme-engraver.ly
+T16	lilypond	input/regression/include-string.ly
+T17	lilypond	input/regression/optimal-page-breaking-hstretch.ly
+T18	lilypond	input/regression/midi-dynamics.ly
+T19	lilypond	input/regression/midi/articulate-repeat.ly
+T20	lilypond	input/regression/utf-8.ly
+T21	lilypond	Documentation/ly-examples/theory.ly
+T22	lilypond	Documentation/ly-examples/tab-example.ly
+T23	lilypond	Documentation/ly-examples/aucun-snippet.ly
+T24	lilypond	Documentation/ly-examples/bach-bwv610.ly
+T25	lilypond	Documentation/ly-examples/granados.ly
+T26	lilypond	Documentation/ly-examples/stockhausen-klavierstueckII.ly
+T27	lilypond	Documentation/ly-examples/bach-schenker.ly
+T28	lilypond	Documentation/ly-examples/cary.ly
+T29	lilypond	Documentation/ly-examples/orchestra.ly
+T30	lilypond	Documentation/ly-examples/sesto-full.ly
+M01	lilypond	input/regression/midi/tempo.ly
+M02	lilypond	input/regression/midi/pan-position.ly
+M03	lilypond	input/regression/midi-pedal.ly
+M04	lilypond	input/regression/midi-microtone.ly
+M05	lilypond	input/regression/midi/repeat-segno.ly
+M06	lilypond	input/regression/midi/staff-map-instrument.ly
+M07	lilypond	input/regression/midi-volume-equaliser.ly
+M08	lilypond	input/regression/midi/crescendo-return-crescendo.ly
+M09	lilypond	input/regression/midi/beat-structure-by-metronome-8-8.ly
+M10	lilypond	input/regression/midi/articulate-accel.ly
+M11	lilypond	input/regression/midi-grace.ly
+M12	lilypond	input/regression/midi/partcombine.ly
+Y01	lilypond	input/regression/key-signature-cancellation.ly
+Y02	lilypond	input/regression/rehearsal-mark-letter.ly
+Y03	lilypond	input/regression/text-mark.ly
+Y04	lilypond	input/regression/phrasing-slur-dash.ly
+Y05	lilypond	input/regression/repeat-tie.ly
+Y06	lilypond	input/regression/coda-mark-formatters.ly
+Y07	lilypond	input/regression/segno-style.ly
+Y08	lilypond	input/regression/section-label-style.ly
+Y09	lilypond	input/regression/repeat-ds-al-coda.ly
+Y10	lilypond	input/regression/jump-unaligned.ly
+Y11	lilypond	input/regression/markup-path.ly
+Y12	lilypond	input/regression/path-exercise.ly
+Y13	lilypond	input/regression/repeat-dc-al-fine.ly
+Y14	lilypond	input/regression/repeat-dc-v-fine-end-visible.ly
+Y15	lilypond	input/regression/repeat-percent.ly
+Y16	lilypond	input/regression/repeat-percent-count-visibility.ly
+Y17	lilypond	input/regression/repeat-slash-mixed.ly
+Y18	lilypond	input/regression/caesura-script-multiple.ly
+Y19	lilypond	input/regression/caesura-style-comma-or-fermata.ly
+Y20	lilypond	input/regression/cue-clef-manually.ly
+Y21	lilypond	input/regression/instrument-switch.ly
+Y22	lilypond	input/regression/part-combine-text.ly
+Y23	lilypond	input/regression/parenthesize.ly
+Y24	lilypond	input/regression/pedal-bracket.ly
+Y25	lilypond	input/regression/pedal-ped.ly
+Y26	lilypond	input/regression/pedal-end.ly
+Y27	lilypond	input/regression/trill-spanner-pitched-consecutive.ly
+Y28	lilypond	input/regression/trill-spanner-pitched.ly
+Y29	lilypond	input/regression/note-names-context.ly
+Y30	lilypond	input/regression/stem-direction-context.ly
+Y31	lilypond	input/regression/vowel-transition.ly
+Y32	lilypond	input/regression/ambitus.ly
+Y33	lilypond	input/regression/cluster.ly
+Y34	lilypond	input/regression/balloon.ly
+Y35	lilypond	input/regression/footnote.ly
+Y36	lilypond	input/regression/grid-lines.ly
+Y37	lilypond	input/regression/measure-grouping.ly
+Y38	lilypond	input/regression/measure-spanner.ly
+Y39	lilypond	input/regression/completion-heads.ly
+Y40	lilypond	input/regression/completion-rest.ly
+Y41	lilypond	input/regression/ligature-bracket.ly
+Y42	lilypond	input/regression/ligature-bracket-X-positions.ly
+Y43	lilypond	input/regression/mensural-ligatures.ly
+Y44	lilypond	input/regression/ambitus-with-ligature.ly
+Y45	lilypond	input/regression/episema.ly
+Y46	lilypond	input/regression/custos.ly
+Y47	lilypond	input/regression/custos-unpitched.ly
+Y48	lilypond	input/regression/augmentum.ly
+Y49	lilypond	input/regression/breathing-sign-ancient.ly
+Y50	lilypond	input/regression/kievan-notation-dots.ly
+Y51	lilypond	input/regression/one-page-breaking.ly
+Y52	lilypond	input/regression/page-minimal-page-breaking.ly
+Y53	lilypond	input/regression/page-minimal-page-breaking-last-page.ly
+Y54	lilypond	input/regression/one-line-breaking.ly
+Y55	lilypond	input/regression/one-line-auto-height-breaking.ly
+Y56	lilypond	input/regression/page-turn-page-breaking.ly
+Y57	lilypond	input/regression/page-turn-page-breaking-score.ly
+Y58	lilypond	input/regression/page-turn-page-breaking-voice.ly
+Y59	lilypond	input/regression/page-turn-page-breaking-repeats.ly
+Y60	lilypond	input/regression/page-turn-page-breaking-first-column.ly
+Y61	lilypond	input/regression/page-turn-page-breaking-auto-first-page.ly
+Y62	lilypond	input/regression/page-turn-page-breaking-auto-first-page2.ly
+Y63	lilypond	input/regression/page-turn-page-breaking-badturns.ly
+Y64	lilypond	input/regression/page-break-turn-toplevel.ly
+Y65	lilypond	input/regression/quote.ly
+Y66	lilypond	input/regression/quote-during.ly
+Y67	lilypond	input/regression/quote-cue-during.ly
+Y68	lilypond	input/regression/quote-cue-event-types.ly
+Y69	lilypond	input/regression/quote-transposition.ly
+Y70	lilypond	input/regression/quote-grace.ly
+Y71	lilypond	input/regression/quote-tie.ly
+Y72	lilypond	input/regression/quote-tuplet.ly
+Y73	lilypond	input/regression/quote-tuplet-end.ly
+Y74	lilypond	input/regression/quote-cyclic.ly
+Y75	lilypond	input/regression/quote-kill-cues.ly
+Y76	lilypond	input/regression/quote-overrides.ly
+Y77	lilypond	input/regression/quote-during-subvoice.ly
+Y78	lilypond	input/regression/fine.ly
+Y79	lilypond	input/regression/lyric-combine-repeat-count.ly
+Y80	lilypond	input/regression/tuplet-subdivision.ly
+Y81	lilypond	input/regression/modify-tag-group-errors.ly
+Y82	lilypond	input/regression/auto-change.ly
+Y83	lilypond	input/regression/autochange-keep-with-tag.ly
+Y84	lilypond	input/regression/accreg.ly
+Y85	lilypond	input/regression/qr-code.ly
+Y86	lilypond	input/regression/qr-code-version.ly
+Y87	lilypond	input/regression/qr-code-error-correction-level.ly
+Y88	lilypond	input/regression/modal-transforms.ly
+Y89	lilypond	input/regression/retrograde.ly
+Y90	lilypond	input/regression/completion-heads-lyrics.ly

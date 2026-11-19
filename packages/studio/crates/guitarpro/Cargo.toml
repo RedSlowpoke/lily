@@ -1,0 +1,11 @@
+[package]
+name = "lily-guitarpro"
+description = "Lily Studio's Guitar Pro import: .gp3, .gp4, .gp5 and .gpx read into one song model and written as LilyPond, without Tauri."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+roxmltree.workspace = true

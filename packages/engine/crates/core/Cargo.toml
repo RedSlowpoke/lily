@@ -1,0 +1,31 @@
+[package]
+name = "lily-engine-core"
+description = "The engine's core: chapter 08 §4.2's C ABI over the parser and the Scheme, the image writer, and the bench and parser exports (docs/research/wasm-engine/08-integration.md, K2)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# The cdylib is core.wasm, which the studio's engine worker runs; the rlib is
+# for the native tests and the image writer (examples/bench.rs).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# `core-debug.wasm` (08 §1.3, D262): a panic's message passed to the host's
+# `env.lily_panic` before the trap; built on stable with panic = "abort".
+[features]
+debug = []
+
+[dependencies]
+lily-engine-chord-names = { path = "../chord-names" }
+lily-engine-figured-bass = { path = "../figured-bass" }
+lily-engine-layout = { path = "../layout" }
+lily-engine-music = { path = "../music" }
+lily-engine-parser = { path = "../parser" }
+lily-engine-scheme = { path = "../scheme" }
+lily-engine-svg = { path = "../svg" }
+lily-engine-tablature = { path = "../tablature" }
+# W7's walk of a page's stencil into the PDF module's display list (MS8 step
+# 5, D270), which the ABI's `lily_pdf` asks for (MS8 step 6, D271).
+lily-engine-pdf = { path = "../pdf", features = ["stencils"] }

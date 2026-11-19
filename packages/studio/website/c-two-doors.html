@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lily Studio</title>
+<meta name="description" content="Write music in LilyPond without programming. Open Lily Studio in your browser, or download it for your Mac.">
+<link rel="icon" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<!--
+  Option C: two doors. The page is the choice itself: the screen is split
+  into the browser and the Mac, each half one big link, in the colours of the
+  app's icon, with the lily on the seam between them.
+-->
+<style>
+  :root {
+    --petal: #f3eefb;
+    --petal-ink: #2a1a4d;
+    --petal-soft: #6a5c86;
+    --violet: #3d2574;
+    --violet-ink: #ffffff;
+    --violet-soft: #c9bce6;
+    --stamen: #f2d27a;
+    --page: #ffffff;
+    --ink: #221a33;
+    --muted: #6d6680;
+    --line: #e6e1ef;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --petal: #241c36;
+      --petal-ink: #f1ebfc;
+      --petal-soft: #b2a6cc;
+      --violet: #4a2f8a;
+      --violet-soft: #d3c7ef;
+      --page: #16121f;
+      --ink: #ece7f6;
+      --muted: #a39cb5;
+      --line: #2f2840;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 400 17px/1.55 'Bricolage Grotesque', system-ui, sans-serif;
+    font-optical-sizing: auto;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--stamen); outline-offset: 4px; border-radius: 6px; }
+
+  .doors {
+    position: relative;
+    display: flex;
+  }
+  .door {
+    position: relative;
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    padding: 300px clamp(24px, 5vw, 72px) 120px;
+    transition: flex-grow .35s cubic-bezier(.2, .7, .2, 1);
+  }
+  .door:hover, .door:focus-within { flex-grow: 1.25; }
+  .web { background: var(--petal); color: var(--petal-ink); }
+  .mac { background: var(--violet); color: var(--violet-ink); }
+
+  .where {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+  }
+  .big {
+    display: block;
+    margin: 4px 0 18px;
+    font-size: clamp(3.5rem, 8.4vw, 7.25rem);
+    line-height: .9;
+    font-weight: 800;
+    letter-spacing: -0.045em;
+    text-decoration: none;
+  }
+  /* The whole half is the link. */
+  .big::after { content: ''; position: absolute; inset: 0; }
+  .big:focus-visible { outline: none; }
+  .door:has(.big:focus-visible) { box-shadow: inset 0 0 0 4px var(--stamen); }
+  .door p { margin: 0; max-width: 26em; }
+  .web p { color: var(--petal-soft); }
+  .mac p { color: var(--violet-soft); }
+  .meta {
+    position: relative;
+    z-index: 1;
+    margin-top: 22px !important;
+    font-size: 14px;
+  }
+  .meta a { text-underline-offset: 3px; }
+  .mac .meta a { color: var(--stamen); }
+
+  /* The lily on the seam, and the name above it. */
+  .crest {
+    position: absolute;
+    top: 36px;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    display: grid;
+    justify-items: center;
+    pointer-events: none;
+  }
+  .crest img {
+    width: 88px; height: 88px;
+    border-radius: 22px;
+    box-shadow: 0 10px 30px -10px rgba(30, 10, 70, .55);
+  }
+  /* The name and the line under it are split by the seam, each half in its door's ink. */
+  .crest .name, .crest .tag {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+  .crest .name { margin-top: 16px; font-weight: 800; font-size: 30px; letter-spacing: -0.02em; line-height: 1.1; }
+  .crest .tag { margin-top: 4px; font-size: 16px; }
+  .crest span:first-child { text-align: right; padding-right: 7px; color: var(--petal-ink); }
+  .crest span:last-child { padding-left: 7px; color: var(--violet-ink); }
+  .crest .tag span:first-child { color: var(--petal-soft); }
+  .crest .tag span:last-child { color: var(--violet-soft); }
+
+  nav {
+    position: absolute;
+    top: 24px;
+    right: clamp(24px, 5vw, 72px);
+    z-index: 3;
+    font-size: 15px;
+  }
+  nav a { color: var(--violet-soft); text-decoration: none; }
+  nav a:hover { color: #fff; }
+
+  /* Below the doors */
+  .inside {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 88px 24px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: 32px 64px;
+  }
+  .inside h2 {
+    margin: 0;
+    font-size: 34px;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+  }
+  .inside ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px 40px;
+  }
+  .inside li b { display: block; font-weight: 600; font-size: 19px; }
+  .inside li span { color: var(--muted); }
+  .inside code { font: 14px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--ink); }
+
+  footer {
+    max-width: 1120px;
+    margin: 88px auto 0;
+    padding: 20px 24px 40px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  @media (max-width: 760px) {
+    .doors { flex-direction: column; min-height: 0; }
+    .door { padding: 40px 24px 44px; }
+    .door:hover, .door:focus-within { flex-grow: 1; }
+    .web { padding-top: 220px; }
+    .crest { top: 28px; }
+    .crest .name, .crest .tag { display: block; text-align: center; }
+    .crest span:first-child, .crest span:last-child { padding: 0; color: var(--petal-ink); }
+    .crest .tag span:first-child, .crest .tag span:last-child { color: var(--petal-soft); }
+    .crest span:last-child::before { content: ' '; }
+    nav { top: 16px; right: 16px; }
+    nav a { color: var(--petal-soft); }
+    .inside { grid-template-columns: 1fr; padding-top: 56px; }
+    .inside ul { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .door { transition: none; }
+    .door:hover, .door:focus-within { flex-grow: 1; }
+  }
+</style>
+</head>
+<body>
+<nav><a href="https://github.com/velet5/lily">GitHub</a></nav>
+
+<div class="doors">
+  <div class="crest">
+    <img src="icon.png" alt="">
+    <div class="name"><span>Lily</span><span>Studio</span></div>
+    <div class="tag"><span>LilyPond scores,</span><span>without programming</span></div>
+  </div>
+
+  <section class="door web" aria-labelledby="web-where">
+    <h2 class="where" id="web-where">In your browser</h2>
+    <a class="big" href="/studio/">Open</a>
+    <p>Sign in and start writing. Your scores are kept in My Scores and
+      engraved as you type. Nothing to install.</p>
+  </section>
+
+  <section class="door mac" aria-labelledby="mac-where">
+    <h2 class="where" id="mac-where">On your Mac</h2>
+    <a class="big" href="https://github.com/velet5/lily/releases/latest">Download</a>
+    <p>The whole studio, with your scores in your own folders, and Stems:
+      split a song into its instruments and start a score from any of them.</p>
+    <p class="meta">Version 0.1.0 for Apple Silicon and macOS 14 or later.<br>
+      Have an Intel Mac? <a href="https://github.com/velet5/lily/releases/latest">Download this one</a>.</p>
+  </section>
+</div>
+
+<section class="inside">
+  <h2>Write music, not code</h2>
+  <ul>
+    <li><b>Engraved as you type</b><span>The score beside the text follows each keystroke.</span></li>
+    <li><b>Mistakes in plain words</b><span><code>“\stacato” is not a LilyPond command</code>, and a click takes you to it.</span></li>
+    <li><b>Hear it</b><span>Notes light up as they play. Mute a part, or give it another instrument.</span></li>
+    <li><b>Piano view</b><span>The notes fall onto a keyboard, as in piano videos.</span></li>
+    <li><b>Print it, share it</b><span>Export the PDF, or the MIDI with or without its muted parts.</span></li>
+    <li><b>Stems, on the Mac</b><span>Make a karaoke track, or separate a song’s instruments and transcribe one.</span></li>
+  </ul>
+</section>
+
+<footer>
+  <span>Free and MIT licensed. Scores are engraved by <a href="https://lilypond.org">LilyPond</a>.</span>
+  <a href="https://github.com/velet5/lily">Source on GitHub</a>
+</footer>
+</body>
+</html>

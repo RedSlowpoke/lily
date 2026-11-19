@@ -1,0 +1,454 @@
+{
+  "name": "lily",
+  "displayName": "Lily \u2014 LilyPond",
+  "description": "LilyPond editing with a side-by-side SVG preview, MIDI playback, diagnostics and IntelliSense.",
+  "version": "0.1.0",
+  "publisher": "lily-dev",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/velet5/lily.git",
+    "directory": "packages/vscode"
+  },
+  "homepage": "https://github.com/velet5/lily/tree/main/packages/vscode#readme",
+  "bugs": {
+    "url": "https://github.com/velet5/lily/issues"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "lilypond",
+    "music",
+    "notation",
+    "score",
+    "midi"
+  ],
+  "main": "./dist/extension.js",
+  "bin": {
+    "lily-check": "./dist/lily-check.js"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "lilypond",
+        "aliases": [
+          "LilyPond",
+          "lilypond"
+        ],
+        "extensions": [
+          ".ly",
+          ".ily"
+        ],
+        "configuration": "./dist/language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lilypond",
+        "scopeName": "source.lilypond",
+        "path": "./dist/syntaxes/lilypond.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "lilypond",
+        "path": "./snippets/lilypond.json"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "lily.midiPlayer",
+        "displayName": "MIDI Player",
+        "selector": [
+          {
+            "filenamePattern": "*.mid"
+          },
+          {
+            "filenamePattern": "*.midi"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "lily.compile",
+        "title": "Compile",
+        "category": "LilyPond",
+        "icon": "$(play)"
+      },
+      {
+        "command": "lily.showOutput",
+        "title": "Show Output",
+        "category": "LilyPond",
+        "icon": "$(output)"
+      },
+      {
+        "command": "lily.preview.openToSide",
+        "title": "Open Preview to the Side",
+        "category": "LilyPond",
+        "icon": {
+          "light": "./media/icons/preview.svg",
+          "dark": "./media/icons/preview-dark.svg"
+        }
+      },
+      {
+        "command": "lily.preview.refresh",
+        "title": "Refresh Preview",
+        "category": "LilyPond",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lily.preview.zoomIn",
+        "title": "Zoom In Preview",
+        "category": "LilyPond",
+        "icon": "$(zoom-in)"
+      },
+      {
+        "command": "lily.preview.zoomOut",
+        "title": "Zoom Out Preview",
+        "category": "LilyPond",
+        "icon": "$(zoom-out)"
+      },
+      {
+        "command": "lily.preview.zoomFit",
+        "title": "Fit Preview to Width",
+        "category": "LilyPond",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "lily.preview.nextPage",
+        "title": "Next Page in Preview",
+        "category": "LilyPond",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "lily.preview.previousPage",
+        "title": "Previous Page in Preview",
+        "category": "LilyPond",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "lily.export.pdf",
+        "title": "Export PDF",
+        "category": "LilyPond",
+        "icon": "$(file-pdf)"
+      },
+      {
+        "command": "lily.export.midi",
+        "title": "Export MIDI",
+        "category": "LilyPond",
+        "icon": "$(music)"
+      },
+      {
+        "command": "lily.midi.play",
+        "title": "Play or Pause MIDI",
+        "category": "LilyPond",
+        "icon": "$(play-circle)"
+      },
+      {
+        "command": "lily.midi.stop",
+        "title": "Stop MIDI",
+        "category": "LilyPond",
+        "icon": "$(debug-stop)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "lily.compile",
+          "when": "editorLangId == lilypond || activeWebviewPanelId == 'lily.preview'"
+        },
+        {
+          "command": "lily.export.pdf",
+          "when": "editorLangId == lilypond || activeWebviewPanelId == 'lily.preview'"
+        },
+        {
+          "command": "lily.export.midi",
+          "when": "editorLangId == lilypond || activeWebviewPanelId == 'lily.preview'"
+        },
+        {
+          "command": "lily.midi.play",
+          "when": "editorLangId == lilypond || activeWebviewPanelId == 'lily.preview'"
+        },
+        {
+          "command": "lily.midi.stop",
+          "when": "lily.previewOpen"
+        },
+        {
+          "command": "lily.preview.openToSide",
+          "when": "editorLangId == lilypond"
+        },
+        {
+          "command": "lily.preview.refresh",
+          "when": "lily.previewOpen"
+        },
+        {
+          "command": "lily.preview.zoomIn",
+          "when": "lily.previewOpen"
+        },
+        {
+          "command": "lily.preview.zoomOut",
+          "when": "lily.previewOpen"
+        },
+        {
+          "command": "lily.preview.zoomFit",
+          "when": "lily.previewOpen"
+        },
+        {
+          "command": "lily.preview.nextPage",
+          "when": "lily.previewOpen"
+        },
+        {
+          "command": "lily.preview.previousPage",
+          "when": "lily.previewOpen"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "lily.preview.openToSide",
+          "when": "editorLangId == lilypond && !notebookEditorFocused",
+          "group": "navigation"
+        },
+        {
+          "command": "lily.compile",
+          "when": "editorLangId == lilypond && !notebookEditorFocused",
+          "group": "1_lily@1"
+        },
+        {
+          "command": "lily.export.pdf",
+          "when": "editorLangId == lilypond && !notebookEditorFocused",
+          "group": "1_lily@2"
+        },
+        {
+          "command": "lily.export.midi",
+          "when": "editorLangId == lilypond && !notebookEditorFocused",
+          "group": "1_lily@3"
+        },
+        {
+          "command": "lily.midi.play",
+          "when": "editorLangId == lilypond && !notebookEditorFocused",
+          "group": "1_lily@4"
+        },
+        {
+          "command": "lily.preview.refresh",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "lily.export.pdf",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "navigation@2"
+        },
+        {
+          "command": "lily.export.midi",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "1_lily@1"
+        },
+        {
+          "command": "lily.midi.play",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "1_lily@2"
+        },
+        {
+          "command": "lily.midi.stop",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "1_lily@3"
+        },
+        {
+          "command": "lily.preview.zoomIn",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "2_zoom@1"
+        },
+        {
+          "command": "lily.preview.zoomOut",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "2_zoom@2"
+        },
+        {
+          "command": "lily.preview.zoomFit",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "2_zoom@3"
+        },
+        {
+          "command": "lily.preview.previousPage",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "3_pages@1"
+        },
+        {
+          "command": "lily.preview.nextPage",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "3_pages@2"
+        },
+        {
+          "command": "lily.showOutput",
+          "when": "activeWebviewPanelId == 'lily.preview'",
+          "group": "9_output"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "lily.preview.openToSide",
+          "when": "resourceLangId == lilypond",
+          "group": "1_open"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "lily.preview.openToSide",
+          "when": "resourceLangId == lilypond",
+          "group": "navigation@90"
+        },
+        {
+          "command": "lily.export.pdf",
+          "when": "resourceLangId == lilypond",
+          "group": "7_lily@1"
+        },
+        {
+          "command": "lily.export.midi",
+          "when": "resourceLangId == lilypond",
+          "group": "7_lily@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "lily.preview.openToSide",
+        "key": "ctrl+k v",
+        "mac": "cmd+k v",
+        "when": "editorLangId == lilypond && !notebookEditorFocused"
+      },
+      {
+        "command": "lily.compile",
+        "key": "ctrl+k b",
+        "mac": "cmd+k b",
+        "when": "editorLangId == lilypond && !notebookEditorFocused"
+      },
+      {
+        "command": "lily.preview.refresh",
+        "key": "ctrl+k b",
+        "mac": "cmd+k b",
+        "when": "activeWebviewPanelId == 'lily.preview'"
+      },
+      {
+        "command": "lily.preview.nextPage",
+        "key": "alt+pagedown",
+        "when": "activeWebviewPanelId == 'lily.preview'"
+      },
+      {
+        "command": "lily.preview.previousPage",
+        "key": "alt+pageup",
+        "when": "activeWebviewPanelId == 'lily.preview'"
+      }
+    ],
+    "configuration": {
+      "title": "Lily",
+      "properties": {
+        "lily.lilypond.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "Path to the `lilypond` executable, or to the directory that contains it. Leave empty to search `PATH` and the usual install locations."
+        },
+        "lily.compile.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "markdownDescription": "Extra command-line arguments for every `lilypond` run, one argument per item, for example `--include=/path/to/my library` or `-dno-point-and-click`."
+        },
+        "lily.preview.colors": {
+          "type": "string",
+          "enum": [
+            "theme",
+            "paper"
+          ],
+          "enumDescriptions": [
+            "Draw the score in the editor's foreground colour on the editor's background.",
+            "Draw the score in black on white pages, whatever the theme."
+          ],
+          "default": "theme",
+          "scope": "window",
+          "description": "Colours of the score preview."
+        },
+        "lily.preview.followCursor": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Highlight in an open preview the note the cursor is on, and scroll to it. Clicking a note in the preview always goes to its place in the source."
+        },
+        "lily.preview.followEditor": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "When another `.ly` file gets the focus, show its score in the open preview. A file that a previewed score `\\include`s, or that has a preview of its own, leaves the previews as they are."
+        },
+        "lily.preview.refreshOnSave": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Recompile and refresh an open preview when its file, or a file it reaches through `\\include`, is saved. When off, use **LilyPond: Compile**."
+        },
+        "lily.preview.refreshDelay": {
+          "type": "number",
+          "default": 150,
+          "minimum": 0,
+          "maximum": 5000,
+          "scope": "window",
+          "markdownDescription": "Milliseconds to coalesce edits/saves before refreshing an open preview. Continuous edits start a request at least every 750 ms (or this delay, if longer); a running compile finishes before the newest pending revision starts."
+        },
+        "lily.preview.refreshOnChange": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Preview unsaved edits to the root and literal includes. Requires `#lily.preview.refreshOnSave#`. Editors are never saved automatically for preview."
+        },
+        "lily.preview.acceleration": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "cache",
+            "off"
+          ],
+          "default": "auto",
+          "scope": "resource",
+          "markdownDescription": "Accelerate classic SVG on the verified LilyPond 2.26.0 backend. Auto uses an isolated warm parent on macOS/Linux; cache starts a fresh process. Unknown backends and custom options fall back to ordinary spawning. Exports always use ordinary LilyPond."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package": "node esbuild.mjs --production",
+    "vscode:prepublish": "npm run package",
+    "vsix": "vsce package --no-dependencies --no-rewrite-relative-links --allow-missing-repository",
+    "check-types": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings -c ../../.oxlintrc.json",
+    "gen:completions": "node scripts/gen-completions.mjs",
+    "lily-check": "node dist/lily-check.js",
+    "test:unit": "node esbuild.mjs --unit && node --test \"out/unit/**/*.test.js\"",
+    "pretest": "npm run check-types && npm run lint && node esbuild.mjs --tests && npm run test:unit",
+    "test": "vscode-test --label host",
+    "test:e2e": "npm run vsix && node scripts/unpack-vsix.mjs && node esbuild.mjs --e2e && vscode-test --label e2e",
+    "screenshots": "npm run vsix && node scripts/unpack-vsix.mjs && node esbuild.mjs --e2e && vscode-test --label screenshots"
+  },
+  "devDependencies": {
+    "@lily/common": "*",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.100.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

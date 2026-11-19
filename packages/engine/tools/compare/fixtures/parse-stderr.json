@@ -1,0 +1,406 @@
+{
+  "parser": "packages/vscode/src/diagnostics/parse.ts",
+  "cases": {
+    "01-unknown-command": [
+      {
+        "file": "01-unknown-command.ly",
+        "line": 2,
+        "column": 6,
+        "severity": "error",
+        "message": "unknown command: `\\foo'"
+      },
+      {
+        "file": "01-unknown-command.ly",
+        "line": 2,
+        "column": 6,
+        "severity": "error",
+        "message": "string outside of text script or \\lyricmode"
+      }
+    ],
+    "02-shorthand": [
+      {
+        "file": "02-shorthand.ly",
+        "line": 2,
+        "column": 6,
+        "severity": "error",
+        "message": "undefined character or shorthand: &"
+      }
+    ],
+    "03-string-eof": [
+      {
+        "file": "03-string-eof.ly",
+        "line": 2,
+        "column": 20,
+        "severity": "error",
+        "message": "EOF found inside string"
+      },
+      {
+        "file": "03-string-eof.ly",
+        "line": 2,
+        "column": 20,
+        "severity": "error",
+        "message": "syntax error, unexpected end of input, expecting \\header"
+      }
+    ],
+    "04-comment-eof": [
+      {
+        "file": "04-comment-eof.ly",
+        "line": 3,
+        "column": 3,
+        "severity": "error",
+        "message": "EOF found inside a comment"
+      }
+    ],
+    "05-version-string": [
+      {
+        "file": "05-version-string.ly",
+        "line": 2,
+        "column": 10,
+        "severity": "error",
+        "message": "quoted string expected after \\version"
+      },
+      {
+        "file": "05-version-string.ly",
+        "line": 2,
+        "column": 11,
+        "severity": "error",
+        "message": "syntax error, unexpected '.'"
+      }
+    ],
+    "06-non-utf8": [
+      {
+        "file": "06-non-utf8.ly",
+        "line": 2,
+        "column": 23,
+        "severity": "warning",
+        "message": "non-UTF-8 input"
+      },
+      {
+        "file": "06-non-utf8.ly",
+        "line": 2,
+        "column": 25,
+        "severity": "warning",
+        "message": "non-UTF-8 input"
+      }
+    ],
+    "07-include-missing": [
+      {
+        "file": "07-include-missing.ly",
+        "line": 2,
+        "column": 10,
+        "severity": "error",
+        "message": "cannot find file: `no-such-file.ily'\n(search path: `.:.:<datadir>/ly:<datadir>/ps:<datadir>/scm:<datadir>/fonts/otf/:<datadir>/fonts/svg/:')"
+      }
+    ],
+    "08-unexpected-brace": [
+      {
+        "file": "08-unexpected-brace.ly",
+        "line": 2,
+        "column": 10,
+        "severity": "error",
+        "message": "syntax error, unexpected '}'"
+      }
+    ],
+    "09-unexpected-eof": [
+      {
+        "file": "09-unexpected-eof.ly",
+        "line": 3,
+        "column": 9,
+        "severity": "error",
+        "message": "syntax error, unexpected end of input"
+      }
+    ],
+    "10-octave-after-duration": [
+      {
+        "file": "10-octave-after-duration.ly",
+        "line": 2,
+        "column": 5,
+        "severity": "error",
+        "message": "octave marks must precede duration"
+      }
+    ],
+    "11-paper-in-score": [
+      {
+        "file": "11-paper-in-score.ly",
+        "line": 2,
+        "column": 17,
+        "severity": "error",
+        "message": "\\paper cannot be used in \\score, use \\layout instead"
+      }
+    ],
+    "12-string-in-notes": [
+      {
+        "file": "12-string-in-notes.ly",
+        "line": 2,
+        "column": 11,
+        "severity": "error",
+        "message": "string outside of text script or \\lyricmode"
+      }
+    ],
+    "13-not-a-note-name": [
+      {
+        "file": "13-not-a-note-name.ly",
+        "line": 2,
+        "column": 6,
+        "severity": "error",
+        "message": "not a note name: foo"
+      }
+    ],
+    "14-not-a-duration": [
+      {
+        "file": "14-not-a-duration.ly",
+        "line": 2,
+        "column": 4,
+        "severity": "error",
+        "message": "not a duration"
+      }
+    ],
+    "15-context-mod": [
+      {
+        "file": "15-context-mod.ly",
+        "line": 2,
+        "column": 18,
+        "severity": "error",
+        "message": "not a context mod"
+      }
+    ],
+    "16-bad-grob-path": [
+      {
+        "file": "16-bad-grob-path.ly",
+        "line": 2,
+        "column": 13,
+        "severity": "error",
+        "message": "bad grob property path"
+      }
+    ],
+    "17-function-argument": [
+      {
+        "file": "17-function-argument.ly",
+        "line": 2,
+        "column": 18,
+        "severity": "error",
+        "message": "wrong type for argument 2.  Expecting pitch, found \"d\""
+      },
+      {
+        "file": "17-function-argument.ly",
+        "line": 2,
+        "column": 1,
+        "severity": "warning",
+        "message": "skipping zero-duration score"
+      },
+      {
+        "file": "17-function-argument.ly",
+        "line": 2,
+        "column": 1,
+        "severity": "warning",
+        "message": "to suppress this, consider adding a spacer rest"
+      }
+    ],
+    "18-optional-argument": [
+      {
+        "file": "18-optional-argument.ly",
+        "line": 2,
+        "column": 15,
+        "severity": "error",
+        "message": "wrong type for argument 1.  Expecting fraction, as pair, found \"3/2\""
+      },
+      {
+        "file": "18-optional-argument.ly",
+        "line": 2,
+        "column": 1,
+        "severity": "warning",
+        "message": "skipping zero-duration score"
+      },
+      {
+        "file": "18-optional-argument.ly",
+        "line": 2,
+        "column": 1,
+        "severity": "warning",
+        "message": "to suppress this, consider adding a spacer rest"
+      }
+    ],
+    "19-markup-unknown": [
+      {
+        "file": "19-markup-unknown.ly",
+        "line": 2,
+        "column": 11,
+        "severity": "error",
+        "message": "unknown command: `\\boldd'"
+      }
+    ],
+    "20-markup-argument": [
+      {
+        "file": "20-markup-argument.ly",
+        "line": 2,
+        "column": 19,
+        "severity": "error",
+        "message": "wrong type for argument 1.  Expecting number, found \"big\"\nERROR: In procedure ly:parse-file:\nIn procedure reverse!: Wrong type argument in position 1: (\"big\" . #f)"
+      }
+    ],
+    "21-scheme-read": [
+      {
+        "file": "21-scheme-read.ly",
+        "line": 2,
+        "column": 2,
+        "severity": "error",
+        "message": "Guile signaled an error for the expression beginning here\n21-scheme-read.ly:4:1: unexpected end of input while searching for: )"
+      },
+      {
+        "file": "21-scheme-read.ly",
+        "line": 2,
+        "column": 2,
+        "severity": "error",
+        "message": "syntax error, unexpected EVENT_IDENTIFIER"
+      }
+    ],
+    "22-scheme-eval": [
+      {
+        "file": "22-scheme-eval.ly",
+        "line": 2,
+        "column": 2,
+        "severity": "error",
+        "message": "Guile signaled an error for the expression beginning here\nIn procedure car: Wrong type (expecting pair): ()"
+      }
+    ],
+    "23-dollar-unbound": [
+      {
+        "file": "23-dollar-unbound.ly",
+        "line": 2,
+        "column": 7,
+        "severity": "error",
+        "message": "Guile signaled an error for the expression beginning here\nUnbound variable: no-such-thing"
+      }
+    ],
+    "24-embedded-lily": [
+      {
+        "file": "24-embedded-lily.ly",
+        "line": 2,
+        "column": 5,
+        "severity": "error",
+        "message": "unknown command: `\\foo'"
+      },
+      {
+        "file": "24-embedded-lily.ly",
+        "line": 2,
+        "column": 5,
+        "severity": "error",
+        "message": "string outside of text script or \\lyricmode"
+      },
+      {
+        "file": "24-embedded-lily.ly",
+        "line": 3,
+        "column": 3,
+        "severity": "error",
+        "message": "error in #{ ... #}"
+      }
+    ],
+    "25-include-string": [
+      {
+        "file": "25-include-string.ly",
+        "line": 1,
+        "severity": "error",
+        "message": "unknown command: `\\foo'\n(in <included string>, line 1, column 6)"
+      },
+      {
+        "file": "25-include-string.ly",
+        "line": 1,
+        "severity": "error",
+        "message": "string outside of text script or \\lyricmode\n(in <included string>, line 1, column 6)"
+      }
+    ],
+    "26-tab-column": [
+      {
+        "file": "26-tab-column.ly",
+        "line": 3,
+        "column": 17,
+        "severity": "error",
+        "message": "unknown command: `\\foo'"
+      },
+      {
+        "file": "26-tab-column.ly",
+        "line": 3,
+        "column": 17,
+        "severity": "error",
+        "message": "string outside of text script or \\lyricmode"
+      }
+    ],
+    "27-utf8-column": [
+      {
+        "file": "27-utf8-column.ly",
+        "line": 2,
+        "column": 20,
+        "severity": "error",
+        "message": "unknown command: `\\foo'"
+      },
+      {
+        "file": "27-utf8-column.ly",
+        "line": 2,
+        "column": 20,
+        "severity": "error",
+        "message": "string outside of text script or \\lyricmode"
+      }
+    ],
+    "28-error-count": [
+      {
+        "file": "28-error-count.ly",
+        "line": 2,
+        "column": 6,
+        "severity": "error",
+        "message": "unknown command: `\\foo'"
+      },
+      {
+        "file": "28-error-count.ly",
+        "line": 2,
+        "column": 6,
+        "severity": "error",
+        "message": "string outside of text script or \\lyricmode"
+      },
+      {
+        "file": "28-error-count.ly",
+        "line": 2,
+        "column": 18,
+        "severity": "error",
+        "message": "wrong type for argument 1.  Expecting string, found (ly:make-pitch -1 2)"
+      }
+    ],
+    "29-deprecated-path": [
+      {
+        "file": "29-deprecated-path.ly",
+        "line": 2,
+        "column": 22,
+        "severity": "warning",
+        "message": "deprecated: missing `.' in property path NoteHead.color"
+      }
+    ],
+    "30-unattached": [
+      {
+        "file": "30-unattached.ly",
+        "line": 2,
+        "column": 3,
+        "severity": "warning",
+        "message": "Unattached ArticulationEvent"
+      },
+      {
+        "file": "30-unattached.ly",
+        "line": 3,
+        "column": 24,
+        "severity": "warning",
+        "message": "Unattached ArticulationEvent"
+      },
+      {
+        "file": "30-unattached.ly",
+        "line": 3,
+        "column": 22,
+        "severity": "warning",
+        "message": "skipping zero-duration score"
+      },
+      {
+        "file": "30-unattached.ly",
+        "line": 3,
+        "column": 22,
+        "severity": "warning",
+        "message": "to suppress this, consider adding a spacer rest"
+      }
+    ]
+  }
+}

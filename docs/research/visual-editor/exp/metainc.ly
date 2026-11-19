@@ -1,0 +1,40 @@
+\version "2.26.0"
+#(define meta-counter 0)
+#(define meta-contexts (make-hash-table))
+#(define (meta-context-key ctx)
+   ;; A context's id, else its name and the order it was first seen in.
+   (or (hashq-ref meta-contexts ctx)
+       (let ((key (format #f "~a#~a" (ly:context-name ctx) (hash-count (const #t) meta-contexts))))
+         (hashq-set! meta-contexts ctx key)
+         key)))
+#(define (meta-event grob)
+   (let loop ((c (ly:grob-property grob 'cause)))
+     (cond ((ly:stream-event? c) c)
+           ((ly:grob? c) (loop (ly:grob-property c 'cause)))
+           (else #f))))
+#(define (Meta_engraver context)
+   (make-engraver
+    (acknowledgers
+     ((grob-interface engraver grob source-engraver)
+      (let* ((ctx (ly:translator-context source-engraver))
+             (now (ly:context-current-moment context))
+             (ev (meta-event grob))
+             (pitch (and ev (ly:event-property ev 'pitch #f)))
+             (dur (and ev (ly:event-property ev 'duration #f)))
+             (origin (and ev (ly:event-property ev 'origin #f))))
+        (set! meta-counter (1+ meta-counter))
+        (ly:grob-set-property! grob 'output-attributes
+          (append
+           `((id . ,(format #f "g~a" meta-counter))
+             (data-grob . ,(grob::name grob))
+             (data-ctx . ,(meta-context-key ctx))
+             (data-at . ,(ly:moment-main now))
+             (data-bar . ,(ly:context-property ctx 'currentBarNumber)))
+           (if (ly:pitch? pitch)
+               `((data-pitch . ,(format #f "~a ~a ~a" (ly:pitch-octave pitch) (ly:pitch-notename pitch) (ly:pitch-alteration pitch))))
+               '())
+           (if (ly:duration? dur) `((data-dur . ,(ly:duration->string dur))) '())
+           (if (ly:input-location? origin)
+               `((data-span . ,(format #f "~a" (cdr (ly:input-both-locations origin)))))
+               '()))))))))
+\layout { \context { \Score \consists #Meta_engraver } }
